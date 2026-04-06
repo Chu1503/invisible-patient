@@ -4,7 +4,6 @@ import { Send } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { analyzeConversation } from "@/lib/analysis";
 import { saveCheckin, saveLastMentalState, generateId, getTodayDate, type Message } from "@/lib/store";
-import { ZBI_QUESTIONS } from "@/lib/prompts";
 
 const INITIAL_MESSAGE: Message = {
   id: "init",
@@ -16,7 +15,7 @@ const INITIAL_MESSAGE: Message = {
 function sanitize(text: string): string {
   return text
     .replace(/—/g, ",")
-    // .replace(/–/g, ",")
+    .replace(/–/g, ",")
     .trim();
 }
 
@@ -38,7 +37,6 @@ export default function TalkPage() {
   const [sessionId] = useState(generateId);
   const [showCrisis, setShowCrisis] = useState(false);
   const [zbiAnswers, setZbiAnswers] = useState<number[]>([]);
-  // Which ZBI question is currently awaiting answer (-1 = none pending)
   const [pendingZbiQ, setPendingZbiQ] = useState<number>(-1);
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -50,7 +48,6 @@ export default function TalkPage() {
   async function sendMessage(overrideText?: string) {
     const text = (overrideText ?? input).trim();
     if (!text || loading) return;
-    // Block sending if there's a pending ZBI question with no rating selected
     if (pendingZbiQ >= 0 && selectedRating === null) return;
 
     const userMsg: Message = {
@@ -64,7 +61,6 @@ export default function TalkPage() {
     setInput("");
     setLoading(true);
 
-    // Commit ZBI answer if one was pending
     let updatedZbiAnswers = [...zbiAnswers];
     if (pendingZbiQ >= 0 && selectedRating !== null) {
       updatedZbiAnswers = [...zbiAnswers, selectedRating];
@@ -73,6 +69,33 @@ export default function TalkPage() {
       setSelectedRating(null);
     }
 
+    await callApiAndStream(newMessages, updatedZbiAnswers);
+  }
+
+  async function sendMessageWithRating(rating: number, currentMessages: Message[], currentZbiAnswers: number[]) {
+    if (loading) return;
+
+    const text = ZBI_LABELS[rating];
+    const userMsg: Message = {
+      id: generateId(),
+      role: "user",
+      content: text,
+      timestamp: Date.now(),
+    };
+    const newMessages = [...currentMessages, userMsg];
+    setMessages(newMessages);
+    setInput("");
+    setLoading(true);
+
+    const updatedZbiAnswers = [...currentZbiAnswers, rating];
+    setZbiAnswers(updatedZbiAnswers);
+    setPendingZbiQ(-1);
+    setSelectedRating(null);
+
+    await callApiAndStream(newMessages, updatedZbiAnswers);
+  }
+
+  async function callApiAndStream(newMessages: Message[], updatedZbiAnswers: number[]) {
     const analysis = analyzeConversation(newMessages, updatedZbiAnswers);
     saveLastMentalState(analysis.mentalState);
     if (analysis.riskLevel === "crisis") setShowCrisis(true);
@@ -127,7 +150,6 @@ export default function TalkPage() {
 
     setLoading(false);
 
-    // Check if this response contains a ZBI question tag
     const { qIndex } = parseZbiTag(full);
     if (qIndex !== null && qIndex === updatedZbiAnswers.length) {
       setPendingZbiQ(qIndex);
@@ -150,13 +172,8 @@ export default function TalkPage() {
 
   function handleRatingSelect(val: number) {
     setSelectedRating(val);
-  }
-
-  function handleRatingSubmit() {
-    if (selectedRating === null) return;
-    // If they haven't typed anything, send a neutral acknowledgment
-    const text = input.trim() || ZBI_LABELS[selectedRating];
-    sendMessage(text);
+    // Pass current state directly to avoid stale closure issues
+    sendMessageWithRating(val, messages, zbiAnswers);
   }
 
   return (
@@ -182,10 +199,11 @@ export default function TalkPage() {
                   </div>
                 )}
                 <div className="flex flex-col gap-3 max-w-sm">
-                  <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${msg.role === "user"
-                    ? "bg-[#163054] text-[#F5F0E8]"
-                    : "bg-[#0D2137] text-[#D4CEBD] border border-white/5"
-                    }`}>
+                  <div className={`px-4 py-3 rounded-2xl text-sm leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-[#163054] text-[#F5F0E8]"
+                      : "bg-[#0D2137] text-[#D4CEBD] border border-white/5"
+                  }`}>
                     {clean || (
                       msg.role === "assistant" && (
                         <span className="inline-flex gap-1">
@@ -197,30 +215,26 @@ export default function TalkPage() {
                     )}
                   </div>
 
-                  {/* ZBI Rating buttons — only show on the active pending message */}
                   {isActiveZbiMsg && (
                     <div className="flex flex-col gap-2">
                       <p className="text-xs text-[#A09890] pl-1">
-                        Question {pendingZbiQ + 1} of 12 — choose how often you feel this way:
+                        Choose how often you feel this way:
                       </p>
                       <div className="flex gap-1.5 flex-wrap">
                         {ZBI_LABELS.map((label, val) => (
                           <button key={val}
                             onClick={() => handleRatingSelect(val)}
-                            className={`flex flex-col items-center px-3 py-2 rounded-xl text-xs transition-all duration-200 border flex-1 min-w-[52px] ${selectedRating === val
-                              ? "bg-[#B2AC88]/25 border-[#B2AC88]/60 text-[#F5F0E8]"
-                              : "border-white/10 text-[#A09890] hover:border-white/25 hover:text-[#D4CEBD]"
-                              }`}>
+                            disabled={loading}
+                            className={`flex flex-col items-center px-3 py-2 rounded-xl text-xs transition-all duration-200 border flex-1 min-w-[52px] ${
+                              selectedRating === val
+                                ? "bg-[#B2AC88]/25 border-[#B2AC88]/60 text-[#F5F0E8]"
+                                : "border-white/10 text-[#A09890] hover:border-white/25 hover:text-[#D4CEBD]"
+                            }`}>
                             <span className="text-base font-light" style={{ fontFamily: "var(--font-display)" }}>{val}</span>
                             <span className="text-[10px] mt-0.5 text-center leading-tight">{label}</span>
                           </button>
                         ))}
                       </div>
-                      {selectedRating !== null && (
-                        <p className="text-xs text-[#B2AC88]/70 pl-1 animate-pulse">
-                          You selected <strong>{ZBI_LABELS[selectedRating]}</strong> — feel free to share more below, then press send.
-                        </p>
-                      )}
                     </div>
                   )}
                 </div>
@@ -231,7 +245,6 @@ export default function TalkPage() {
         </div>
       </div>
 
-      {/* ZBI Progress bar */}
       {zbiAnswers.length > 0 && (
         <div className="fixed top-16 left-0 right-0 h-0.5 bg-white/5">
           <div
@@ -241,7 +254,6 @@ export default function TalkPage() {
         </div>
       )}
 
-      {/* Crisis banner */}
       {showCrisis && (
         <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 max-w-sm w-full mx-4">
           <div className="bg-[#1A0D0D] border border-[#8B5A5A]/40 rounded-2xl p-4 text-sm">
@@ -257,12 +269,11 @@ export default function TalkPage() {
         </div>
       )}
 
-      {/* Input */}
       <div className="fixed bottom-0 left-0 right-0 px-4 pb-6 pt-4 bg-gradient-to-t from-[#090d15] via-[#090d15] to-transparent">
         <div className="max-w-2xl mx-auto flex flex-col gap-2">
-          {pendingZbiQ >= 0 && selectedRating === null && (
+          {pendingZbiQ >= 0 && (
             <p className="text-xs text-center text-[#A09890]">
-              Please select a rating above before continuing
+              Select a rating above to continue
             </p>
           )}
           <div className="flex gap-3">
@@ -272,26 +283,16 @@ export default function TalkPage() {
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();
-                  if (pendingZbiQ >= 0) handleRatingSubmit();
-                  else sendMessage();
+                  if (pendingZbiQ < 0) sendMessage();
                 }
               }}
-              placeholder={
-                pendingZbiQ >= 0
-                  ? selectedRating !== null
-                    ? "Add anything you'd like to share... (optional)"
-                    : "Select a rating above first..."
-                  : "Share what's on your mind..."
-              }
-              disabled={pendingZbiQ >= 0 && selectedRating === null}
+              placeholder="Share what's on your mind..."
+              disabled={pendingZbiQ >= 0}
               className="flex-1 bg-[#0D2137] border border-white/10 rounded-2xl px-5 py-3.5 text-[#F5F0E8] placeholder-[#A09890] text-sm outline-none focus:border-[#B2AC88]/40 transition-all disabled:opacity-40"
             />
             <button
-              onClick={() => {
-                if (pendingZbiQ >= 0) handleRatingSubmit();
-                else sendMessage();
-              }}
-              disabled={loading || (pendingZbiQ >= 0 ? selectedRating === null : !input.trim())}
+              onClick={() => sendMessage()}
+              disabled={loading || pendingZbiQ >= 0 || !input.trim()}
               className="w-12 h-12 rounded-2xl bg-[#B2AC88]/20 hover:bg-[#B2AC88]/30 disabled:opacity-40 transition-all flex items-center justify-center text-[#B2AC88]">
               <Send size={16} />
             </button>
