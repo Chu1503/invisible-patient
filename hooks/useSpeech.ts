@@ -2,7 +2,49 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-type RecognitionInstance = any;
+interface RecognitionResult {
+  [index: number]: { transcript: string };
+  isFinal: boolean;
+}
+
+interface RecognitionEvent {
+  resultIndex: number;
+  results: ArrayLike<RecognitionResult>;
+}
+
+interface RecognitionErrorEvent {
+  error?: string;
+}
+
+interface RecognitionInstance {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onresult: ((event: RecognitionEvent) => void) | null;
+  onerror: ((event: RecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
+interface RecognitionConstructor {
+  new (): RecognitionInstance;
+}
+
+interface SpeechWindow extends Window {
+  SpeechRecognition?: RecognitionConstructor;
+  webkitSpeechRecognition?: RecognitionConstructor;
+}
+
+interface StartListeningOptions {
+  onFinalTranscript: (text: string) => void;
+  onInterimTranscript?: (text: string) => void;
+  autoRestart?: boolean;
+  silenceMs?: number;
+}
 
 export function useSpeechRecognition() {
   const recognitionRef = useRef<RecognitionInstance | null>(null);
@@ -10,6 +52,9 @@ export function useSpeechRecognition() {
   const transcriptTimeoutRef = useRef<number | null>(null);
   const shouldKeepListeningRef = useRef(false);
   const finalTranscriptRef = useRef("");
+  const startListeningRef = useRef<
+    (options: StartListeningOptions) => void
+  >(() => {});
 
   const [supported, setSupported] = useState(false);
   const [listening, setListening] = useState(false);
@@ -17,13 +62,14 @@ export function useSpeechRecognition() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    const speechWindow = window as SpeechWindow;
     const ok = !!(
-      (window as any).SpeechRecognition ||
-      (window as any).webkitSpeechRecognition
+      speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition
     );
-    setSupported(ok);
+    const supportTimer = window.setTimeout(() => setSupported(ok), 0);
 
     return () => {
+      window.clearTimeout(supportTimer);
       if (restartTimeoutRef.current) window.clearTimeout(restartTimeoutRef.current);
       if (transcriptTimeoutRef.current) window.clearTimeout(transcriptTimeoutRef.current);
       try {
@@ -60,16 +106,11 @@ export function useSpeechRecognition() {
       onInterimTranscript,
       autoRestart = true,
       silenceMs = 1400,
-    }: {
-      onFinalTranscript: (text: string) => void;
-      onInterimTranscript?: (text: string) => void;
-      autoRestart?: boolean;
-      silenceMs?: number;
-    }) => {
+    }: StartListeningOptions) => {
       if (typeof window === "undefined") return;
+      const speechWindow = window as SpeechWindow;
       const SpeechRecognitionAPI =
-        (window as any).SpeechRecognition ||
-        (window as any).webkitSpeechRecognition;
+        speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition;
 
       if (!SpeechRecognitionAPI) return;
 
@@ -94,7 +135,7 @@ export function useSpeechRecognition() {
         setListening(true);
       };
 
-      recognition.onresult = (e: any) => {
+      recognition.onresult = (e: RecognitionEvent) => {
         let interim = "";
         let finalChunk = "";
 
@@ -138,7 +179,7 @@ export function useSpeechRecognition() {
         }
       };
 
-      recognition.onerror = (e: any) => {
+      recognition.onerror = (e: RecognitionErrorEvent) => {
         setListening(false);
 
         const benign =
@@ -148,7 +189,7 @@ export function useSpeechRecognition() {
 
         if (autoRestart && shouldKeepListeningRef.current && benign) {
           restartTimeoutRef.current = window.setTimeout(() => {
-            startListening({
+            startListeningRef.current({
               onFinalTranscript,
               onInterimTranscript,
               autoRestart,
@@ -163,7 +204,7 @@ export function useSpeechRecognition() {
 
         if (autoRestart && shouldKeepListeningRef.current) {
           restartTimeoutRef.current = window.setTimeout(() => {
-            startListening({
+            startListeningRef.current({
               onFinalTranscript,
               onInterimTranscript,
               autoRestart,
@@ -179,6 +220,10 @@ export function useSpeechRecognition() {
     },
     [clearTimers]
   );
+
+  useEffect(() => {
+    startListeningRef.current = startListening;
+  }, [startListening]);
 
   return {
     supported,

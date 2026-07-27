@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Mic, Volume2 } from "lucide-react";
+import { Send, Mic } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { analyzeConversation } from "@/lib/analysis";
 import {
@@ -11,11 +11,19 @@ import {
   getTodayDate,
   type Message,
 } from "@/lib/store";
-import { useSpeechRecognition, useSpeechSynthesis } from "@/hooks/useSpeech";
 import { useRouter } from "next/navigation";
+import {
+  getActiveCareRecipient,
+  getCareEvents,
+  getCaregiverProfile,
+  saveWorkflowResult,
+  type CareRecipient,
+  type CareWorkflowResult,
+  type CaregiverProfile,
+} from "@/lib/care";
 
 function sanitize(text: string): string {
-  return text.replace(/—/g, ",").replace(/–/g, ",").trim();
+  return text.replace(/\s*[\u2013\u2014]\s*/g, ", ").trim();
 }
 
 const ZBI_LABELS = ["Never", "Rarely", "Sometimes", "Frequently", "Nearly Always"];
@@ -33,8 +41,6 @@ function parseZbiTag(content: string): { clean: string; qIndex: number | null } 
 export default function TalkPage() {
   const router = useRouter();
 
-  const [mounted, setMounted] = useState(false);
-
   const [messages, setMessages] = useState<Message[]>([
     {
       id: "init",
@@ -51,57 +57,37 @@ export default function TalkPage() {
   const [zbiAnswers, setZbiAnswers] = useState<number[]>([]);
   const [pendingZbiQ, setPendingZbiQ] = useState<number>(-1);
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
-  const [voiceMode, setVoiceMode] = useState(false);
+  const [caregiver, setCaregiver] = useState<CaregiverProfile | null>(null);
+  const [recipient, setRecipient] = useState<CareRecipient | null>(null);
+  const [requestError, setRequestError] = useState("");
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const {
-    listening,
-    supported: sttSupported,
-    startListening,
-    stopListening,
-  } = useSpeechRecognition();
-
-  const { speaking, speak, stopSpeaking } = useSpeechSynthesis();
-
   useEffect(() => {
-    setMounted(true);
-    setMessages([
-      {
-        id: "init",
-        role: "assistant",
-        content: "I'm here whenever you're ready. How are you doing today?",
-        timestamp: Date.now(),
-      },
-    ]);
+    const timer = window.setTimeout(() => {
+      setCaregiver(getCaregiverProfile());
+      setRecipient(getActiveCareRecipient());
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, pendingZbiQ]);
 
-  useEffect(() => {
-    if (!voiceMode) stopSpeaking();
-  }, [voiceMode, stopSpeaking]);
-
   const canSend =
     pendingZbiQ >= 0
       ? selectedRating !== null && input.trim().length > 0
       : input.trim().length > 0;
 
-  function handleTranscript(text: string) {
-    setInput((prev) => (prev ? `${prev} ${text}` : text));
-    inputRef.current?.focus();
-  }
-
-
-
   async function callApiAndStream(
     newMessages: Message[],
-    updatedZbiAnswers: number[]
+    updatedZbiAnswers: number[],
+    caregiverText: string
   ) {
     const analysis = analyzeConversation(newMessages, updatedZbiAnswers);
+    setRequestError("");
 
     saveLastMentalState(analysis.mentalState);
 
@@ -122,6 +108,31 @@ export default function TalkPage() {
       riskLevel: analysis.riskLevel,
     });
 
+    let workflow: CareWorkflowResult | null = null;
+    try {
+      const workflowResponse = await fetch("/api/workflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: caregiverText,
+          recipient,
+          recentEvents: getCareEvents().slice(0, 20),
+          zipCode: caregiver?.zipCode,
+          caregiverName: caregiver?.displayName,
+        }),
+      });
+      if (workflowResponse.ok) {
+        const preparedWorkflow =
+          (await workflowResponse.json()) as CareWorkflowResult | null;
+        if (preparedWorkflow) {
+          workflow = preparedWorkflow;
+          saveWorkflowResult(preparedWorkflow);
+        }
+      }
+    } catch {
+      workflow = null;
+    }
+
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: {
@@ -136,12 +147,18 @@ export default function TalkPage() {
           zbiAnswers: updatedZbiAnswers,
           riskLevel: analysis.riskLevel,
           dominantThemes: analysis.dominantThemes,
+          caregiver,
+          recipient,
+          workflow,
         },
       }),
     });
 
-    if (!res.body) {
+    if (!res.ok || !res.body) {
       setLoading(false);
+      setRequestError(
+        "The companion could not respond. Your care note and next steps were still saved."
+      );
       return;
     }
 
@@ -173,15 +190,11 @@ export default function TalkPage() {
 
     setLoading(false);
 
-    const { clean, qIndex } = parseZbiTag(full);
+    const { qIndex } = parseZbiTag(full);
 
     if (qIndex !== null && qIndex === updatedZbiAnswers.length) {
       setPendingZbiQ(qIndex);
       setSelectedRating(null);
-    }
-
-    if (voiceMode) {
-      speak(clean);
     }
 
     const finalMessages = [
@@ -205,9 +218,6 @@ export default function TalkPage() {
 
   async function sendMessage() {
     if (!canSend || loading) return;
-
-    if (listening) stopListening();
-    if (speaking) stopSpeaking();
 
     const text = input.trim();
 
@@ -235,14 +245,21 @@ export default function TalkPage() {
       setSelectedRating(null);
     }
 
-    await callApiAndStream(newMessages, updatedZbiAnswers);
+    try {
+      await callApiAndStream(newMessages, updatedZbiAnswers, text);
+    } catch {
+      setLoading(false);
+      setRequestError(
+        "The companion could not respond. Please check your connection and try again."
+      );
+    }
   }
 
   return (
     <main className="min-h-screen bg-[#090d15] flex flex-col">
       <Navbar />
 
-      <div className="fixed top-16 left-0 right-0 z-40 flex items-center justify-end px-6 py-2.5 bg-[#090d15]/90 backdrop-blur-sm border-b border-white/5">
+      <div className="talk-progress">
         {zbiAnswers.length < 12 ? (
           <div className="flex items-center gap-1.5">
             {Array.from({ length: 12 }, (_, i) => (
@@ -250,10 +267,10 @@ export default function TalkPage() {
                 key={i}
                 className="rounded-full transition-all duration-300"
                 style={{
-                  width: i < zbiAnswers.length ? 7 : 5,
-                  height: i < zbiAnswers.length ? 7 : 5,
+                  width: i < zbiAnswers.length ? 8 : 6,
+                  height: i < zbiAnswers.length ? 8 : 6,
                   backgroundColor:
-                    i < zbiAnswers.length ? "#B2AC88" : "rgba(255,255,255,0.12)",
+                    i < zbiAnswers.length ? "#F2D461" : "rgba(0,29,33,0.28)",
                 }}
               />
             ))}
@@ -265,7 +282,7 @@ export default function TalkPage() {
         )}
       </div>
 
-      <div className="flex-1 flex flex-col max-w-2xl mx-auto w-full pt-28 pb-40 px-4">
+      <div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 pb-44 pt-28 max-[700px]:pt-20">
         <div className="flex-1 flex flex-col gap-4 py-4">
           {messages.map((msg) => {
             const { clean, qIndex } = parseZbiTag(msg.content);
@@ -286,12 +303,7 @@ export default function TalkPage() {
               >
                 {msg.role === "assistant" && (
                   <div className="w-8 h-8 rounded-full bg-[#B2AC88]/20 flex items-center justify-center flex-shrink-0 mt-1">
-                    <div
-                      className={`w-3 h-3 rounded-full transition-all duration-300 ${speaking
-                        ? "bg-[#B2AC88] animate-pulse scale-110"
-                        : "bg-[#B2AC88]/60"
-                        }`}
-                    />
+                    <div className="w-3 h-3 rounded-full bg-[#B2AC88]/60" />
                   </div>
                 )}
 
@@ -336,10 +348,9 @@ export default function TalkPage() {
                             key={val}
                             onClick={() => setSelectedRating(val)}
                             disabled={loading}
-                            className={`flex flex-col items-center px-2 py-2 rounded-xl text-xs transition-all duration-200 border flex-1 ${selectedRating === val
-                              ? "bg-[#B2AC88]/25 border-[#B2AC88]/60 text-[#F5F0E8]"
-                              : "border-white/10 text-[#A09890] hover:border-white/25 hover:text-[#D4CEBD]"
-                              }`}
+                            className={`zbi-rating flex flex-1 flex-col items-center px-2 py-2 text-xs ${
+                              selectedRating === val ? "is-selected" : ""
+                            }`}
                           >
                             <span
                               className="text-base font-light"
@@ -367,13 +378,20 @@ export default function TalkPage() {
             );
           })}
 
+
+          {requestError && (
+            <p className="ml-11 rounded-xl border border-[#8B5A5A]/30 bg-[#8B5A5A]/10 px-3 py-2 text-xs text-[#D4CEBD]">
+              {requestError}
+            </p>
+          )}
+
           <div ref={bottomRef} />
         </div>
       </div>
 
       {crisisTriggered && (
-        <div className="fixed bottom-28 left-0 right-0 px-4 z-50">
-          <div className="max-w-2xl mx-auto bg-[#1A0D0D] border border-[#8B5A5A]/50 rounded-2xl p-4">
+        <div className="crisis-banner fixed left-0 right-0 z-50 px-4">
+          <div className="max-w-4xl mx-auto bg-[#1A0D0D] border border-[#8B5A5A]/50 rounded-2xl p-4">
             <p className="text-[#F5F0E8] text-xs font-medium mb-3">
               If you or someone is in immediate danger, please reach out now:
             </p>
@@ -417,49 +435,14 @@ export default function TalkPage() {
         </div>
       )}
 
-      <div className="fixed bottom-0 left-0 right-0 px-4 pb-6 pt-4 bg-gradient-to-t from-[#090d15] via-[#090d15] to-transparent">
-        <div className="max-w-2xl mx-auto flex flex-col gap-2">
+      <div className="talk-composer">
+        <div className="max-w-4xl mx-auto flex flex-col gap-2">
           {pendingZbiQ >= 0 && (
             <p className="text-xs text-center text-[#A09890]">
               {selectedRating === null
                 ? "Select a rating above, then share your thoughts"
                 : "Add a few words, then press send"}
             </p>
-          )}
-
-          {voiceMode && (
-            <div className="flex items-center justify-center gap-2 mb-1 h-5">
-              {listening ? (
-                <div className="flex items-center gap-2">
-                  <div className="flex items-end gap-0.5">
-                    {[0, 1, 2, 3, 4].map((i) => (
-                      <div
-                        key={i}
-                        className="w-1 bg-[#B2AC88] rounded-full animate-bounce"
-                        style={{
-                          height: `${8 + (i % 3) * 5}px`,
-                          animationDelay: `${i * 80}ms`,
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <span className="text-xs text-[#B2AC88]">Listening...</span>
-                </div>
-              ) : speaking ? (
-                <div className="flex items-center gap-2">
-                  <Volume2 size={12} className="text-[#B2AC88] animate-pulse" />
-                  <span className="text-xs text-[#A09890]">Speaking...</span>
-                  <button
-                    onClick={stopSpeaking}
-                    className="text-xs text-[#A09890] hover:text-[#D4CEBD] underline"
-                  >
-                    stop
-                  </button>
-                </div>
-              ) : (
-                <span className="text-xs text-[#A09890]">Tap mic to speak</span>
-              )}
-            </div>
           )}
 
           <div className="flex gap-2">
@@ -474,9 +457,7 @@ export default function TalkPage() {
                 }
               }}
               placeholder={
-                listening
-                  ? "Listening..."
-                  : pendingZbiQ >= 0 && selectedRating === null
+                pendingZbiQ >= 0 && selectedRating === null
                     ? "Select a rating first..."
                     : "Share what's on your mind..."
               }
@@ -484,23 +465,23 @@ export default function TalkPage() {
               className="flex-1 bg-[#111827] border border-white/10 rounded-2xl px-5 py-3.5 text-[#F5F0E8] placeholder-[#A09890] text-sm outline-none focus:border-[#B2AC88]/40 transition-all disabled:opacity-40"
             />
 
-            {mounted && sttSupported && (
-              <button
-                onClick={() => router.push("/talk/voice")}
-                className="w-12 h-12 rounded-2xl transition-all flex items-center justify-center flex-shrink-0 border bg-white/5 hover:bg-white/10 border-transparent"
-                type="button"
-              >
-                <Mic size={16} className="text-[#A09890]" />
-              </button>
-            )}
+            <button
+              onClick={() => router.push("/talk/voice")}
+              className="talk-record-button"
+              type="button"
+              aria-label="Open two minute voice check in"
+            >
+              <Mic size={17} />
+            </button>
 
             <button
               onClick={sendMessage}
               disabled={!canSend || loading}
-              className="w-12 h-12 rounded-2xl bg-[#B2AC88]/20 hover:bg-[#B2AC88]/30 disabled:opacity-40 transition-all flex items-center justify-center text-[#B2AC88] flex-shrink-0"
+              className="talk-send-button"
               type="button"
+              aria-label="Send message"
             >
-              <Send size={16} />
+              <Send size={17} />
             </button>
           </div>
         </div>

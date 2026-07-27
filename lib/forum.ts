@@ -116,9 +116,9 @@ export function getMyTag(): string {
 }
 
 export function getMyStage(): string {
-  if (typeof window === "undefined") return CARE_STAGES[5];
+  if (typeof window === "undefined") return CARE_STAGES[0];
   const existing = localStorage.getItem("ip_forum_stage");
-  return existing || CARE_STAGES[5];
+  return existing || CARE_STAGES[0];
 }
 
 export function saveMyStage(stage: string): void {

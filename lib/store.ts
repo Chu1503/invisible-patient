@@ -105,21 +105,12 @@ export function getLast7DaysCheckins(): CheckinEntry[] {
 }
 
 export const AURA_COLORS: Record<MentalState, string> = {
-  calm:       "#4A7B9D",
-  restless:   "#8B6B5A",
-  anxious:    "#8B5A6B",
-  hopeful:    "#5A8B6B",
-  tired:      "#5A5A7A",
-  overwhelmed:"#7A5A5A",
-};
-
-export const STATE_LABELS: Record<MentalState, string> = {
-  calm:       "Calm",
-  restless:   "Restless",
-  anxious:    "Anxious",
-  hopeful:    "Hopeful",
-  tired:      "Tired",
-  overwhelmed:"Overwhelmed",
+  calm:       "#2E756D",
+  restless:   "#17645F",
+  anxious:    "#0B4B4A",
+  hopeful:    "#438275",
+  tired:      "#56716F",
+  overwhelmed:"#063A3D",
 };
 
 export function generateId(): string {

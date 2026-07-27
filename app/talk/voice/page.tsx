@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, MicOff, X, Volume2 } from "lucide-react";
 import { analyzeConversation } from "@/lib/analysis";
@@ -11,13 +11,59 @@ import {
   getTodayDate,
   type Message,
 } from "@/lib/store";
+import {
+  getActiveCareRecipient,
+  getCareEvents,
+  getCaregiverProfile,
+  saveWorkflowResult,
+  type CareRecipient,
+  type CareWorkflowResult,
+  type CaregiverProfile,
+} from "@/lib/care";
 
 const ZBI_LABELS = ["Never", "Rarely", "Sometimes", "Frequently", "Nearly Always"];
 
 type VoiceState = "idle" | "listening" | "thinking" | "speaking";
 
+interface VoiceRecognitionResult {
+  [index: number]: { transcript: string };
+  isFinal: boolean;
+}
+
+interface VoiceRecognitionEvent {
+  resultIndex: number;
+  results: ArrayLike<VoiceRecognitionResult>;
+}
+
+interface VoiceRecognitionErrorEvent {
+  error?: string;
+}
+
+interface VoiceRecognition {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  onstart: (() => void) | null;
+  onresult: ((event: VoiceRecognitionEvent) => void) | null;
+  onerror: ((event: VoiceRecognitionErrorEvent) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
+interface VoiceRecognitionConstructor {
+  new (): VoiceRecognition;
+}
+
+interface VoiceWindow extends Window {
+  SpeechRecognition?: VoiceRecognitionConstructor;
+  webkitSpeechRecognition?: VoiceRecognitionConstructor;
+}
+
 function sanitize(text: string): string {
-  return text.replace(/—/g, ",").replace(/–/g, ",").trim();
+  return text.replace(/\s*[\u2013\u2014]\s*/g, ", ").trim();
 }
 
 function parseZbiTag(content: string): { clean: string; qIndex: number | null } {
@@ -54,33 +100,38 @@ export default function VoicePage() {
   const [selectedRating, setSelectedRating] = useState<number | null>(null);
   const [crisisTriggered, setCrisisTriggered] = useState(false);
   const [greetingSpoken, setGreetingSpoken] = useState(false);
+  const [caregiver, setCaregiver] = useState<CaregiverProfile | null>(null);
+  const [recipient, setRecipient] = useState<CareRecipient | null>(null);
+  const [requestError, setRequestError] = useState("");
 
-  const recognitionRef = useRef<any>(null);
+  const recognitionRef = useRef<VoiceRecognition | null>(null);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const finalTranscriptRef = useRef("");
   const isProcessingRef = useRef(false);
 
   useEffect(() => {
-    setMounted(true);
-
-    if (typeof window !== "undefined") {
+    const timer = window.setTimeout(() => {
+      setMounted(true);
+      const voiceWindow = window as VoiceWindow;
       const hasRecognition = !!(
-        (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        voiceWindow.SpeechRecognition || voiceWindow.webkitSpeechRecognition
       );
       const hasSynthesis = !!window.speechSynthesis;
       setVoiceSupported(hasRecognition && hasSynthesis);
-    }
-
-    setMessages([
-      {
-        id: "init",
-        role: "assistant",
-        content: "I'm here whenever you're ready. How are you doing today?",
-        timestamp: Date.now(),
-      },
-    ]);
+      setMessages([
+        {
+          id: "init",
+          role: "assistant",
+          content: "I'm here whenever you're ready. How are you doing today?",
+          timestamp: Date.now(),
+        },
+      ]);
+      setCaregiver(getCaregiverProfile());
+      setRecipient(getActiveCareRecipient());
+    }, 0);
 
     return () => {
+      window.clearTimeout(timer);
       try {
         recognitionRef.current?.abort();
       } catch {}
@@ -90,7 +141,7 @@ export default function VoicePage() {
     };
   }, []);
 
-  function getPreferredVoice(): SpeechSynthesisVoice | null {
+  const getPreferredVoice = useCallback((): SpeechSynthesisVoice | null => {
     if (typeof window === "undefined" || !window.speechSynthesis) return null;
 
     const voices = window.speechSynthesis.getVoices();
@@ -117,9 +168,9 @@ export default function VoicePage() {
       voices.find((v) => v.lang.startsWith("en")) ??
       null
     );
-  }
+  }, []);
 
-  function speak(text: string, onDone?: () => void) {
+  const speak = useCallback((text: string, onDone?: () => void) => {
     if (typeof window === "undefined" || !window.speechSynthesis) {
       onDone?.();
       return;
@@ -174,7 +225,7 @@ export default function VoicePage() {
         window.speechSynthesis.onvoiceschanged = null;
       };
     }
-  }
+  }, [getPreferredVoice]);
 
   function stopSpeaking() {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -187,8 +238,9 @@ export default function VoicePage() {
     if (voiceState === "thinking") return;
     if (isProcessingRef.current) return;
 
+    const voiceWindow = window as VoiceWindow;
     const SpeechRecognitionAPI =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      voiceWindow.SpeechRecognition || voiceWindow.webkitSpeechRecognition;
 
     if (!SpeechRecognitionAPI) return;
 
@@ -211,7 +263,7 @@ export default function VoicePage() {
       setVoiceState("listening");
     };
 
-    recognition.onresult = (e: any) => {
+    recognition.onresult = (e: VoiceRecognitionEvent) => {
       let interim = "";
       let finalText = "";
 
@@ -232,7 +284,7 @@ export default function VoicePage() {
       setTranscript(combined);
     };
 
-    recognition.onerror = (e: any) => {
+    recognition.onerror = (e: VoiceRecognitionErrorEvent) => {
       if (e?.error !== "aborted") {
         setVoiceState("idle");
       }
@@ -272,7 +324,7 @@ export default function VoicePage() {
     }, 400);
 
     return () => clearTimeout(timer);
-  }, [mounted, voiceSupported, greetingSpoken, initialMessage.content]);
+  }, [mounted, voiceSupported, greetingSpoken, initialMessage.content, speak]);
 
   async function handleFinalTranscript(text: string) {
     const cleanedText = text.trim();
@@ -311,6 +363,7 @@ export default function VoicePage() {
 
     const analysis = analyzeConversation(newMessages, updatedZbiAnswers);
     saveLastMentalState(analysis.mentalState);
+    setRequestError("");
 
     if (analysis.riskLevel === "crisis") {
       setCrisisTriggered(true);
@@ -329,6 +382,31 @@ export default function VoicePage() {
       riskLevel: analysis.riskLevel,
     });
 
+    let workflow: CareWorkflowResult | null = null;
+    try {
+      const workflowResponse = await fetch("/api/workflow", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: cleanedText,
+          recipient,
+          recentEvents: getCareEvents().slice(0, 20),
+          zipCode: caregiver?.zipCode,
+          caregiverName: caregiver?.displayName,
+        }),
+      });
+      if (workflowResponse.ok) {
+        const preparedWorkflow =
+          (await workflowResponse.json()) as CareWorkflowResult | null;
+        if (preparedWorkflow) {
+          workflow = preparedWorkflow;
+          saveWorkflowResult(preparedWorkflow);
+        }
+      }
+    } catch {
+      workflow = null;
+    }
+
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: {
@@ -343,13 +421,19 @@ export default function VoicePage() {
           zbiAnswers: updatedZbiAnswers,
           riskLevel: analysis.riskLevel,
           dominantThemes: analysis.dominantThemes,
+          caregiver,
+          recipient,
+          workflow,
         },
       }),
     });
 
-    if (!res.body) {
+    if (!res.ok || !res.body) {
       isProcessingRef.current = false;
       setVoiceState("idle");
+      setRequestError(
+        "The companion could not respond. Your care note and next steps were still saved."
+      );
       return;
     }
 
@@ -422,8 +506,8 @@ export default function VoicePage() {
   const canStopTalking = voiceState === "listening";
 
   return (
-    <main className="min-h-screen bg-[#090d15] flex flex-col items-center justify-between px-6 py-8 relative">
-      <div className="w-full flex justify-between items-center pt-4">
+    <main className="min-h-screen bg-[#090d15] flex flex-col items-center justify-between gap-4 px-4 py-5 relative">
+      <div className="voice-header ip-panel flex items-center justify-between">
         <button
           onClick={() => {
             stopSpeaking();
@@ -448,14 +532,14 @@ export default function VoicePage() {
                 width: i < zbiAnswers.length ? 7 : 5,
                 height: i < zbiAnswers.length ? 7 : 5,
                 backgroundColor:
-                  i < zbiAnswers.length ? "#B2AC88" : "rgba(255,255,255,0.12)",
+                  i < zbiAnswers.length ? "#F2D461" : "rgba(255,255,255,0.2)",
               }}
             />
           ))}
         </div>
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center gap-8 w-full max-w-lg">
+      <div className="voice-content flex flex-1 flex-col items-center justify-center gap-6 py-6">
         {!voiceSupported && mounted ? (
           <div className="text-center px-4">
             <p className="text-[#D4CEBD] text-base leading-relaxed">
@@ -492,10 +576,8 @@ export default function VoicePage() {
                     <button
                       key={val}
                       onClick={() => setSelectedRating(val)}
-                      className={`flex flex-col items-center px-2 py-3 rounded-2xl text-xs transition-all duration-200 border flex-1 ${
-                        selectedRating === val
-                          ? "bg-[#B2AC88]/25 border-[#B2AC88]/60 text-[#F5F0E8]"
-                          : "border-white/10 text-[#A09890] hover:border-white/25 hover:text-[#D4CEBD]"
+                      className={`voice-rating zbi-rating flex flex-1 flex-col items-center px-2 py-3 text-xs ${
+                        selectedRating === val ? "is-selected" : ""
                       }`}
                       type="button"
                     >
@@ -525,7 +607,7 @@ export default function VoicePage() {
             )}
 
             {transcript && (
-              <div className="w-full max-w-md rounded-2xl border border-[#B2AC88]/20 bg-white/5 px-4 py-3">
+              <div className="w-full max-w-md rounded-2xl border border-[#001D21]/15 bg-[#001D21]/5 px-4 py-3">
                 <p className="text-[11px] uppercase tracking-wider text-[#A09890] mb-1">
                   Live transcript
                 </p>
@@ -538,6 +620,13 @@ export default function VoicePage() {
             {lastUserMsg && !transcript && voiceState !== "listening" && (
               <p className="text-[#A09890]/50 text-xs text-center px-8 truncate max-w-xs">
                 You: {lastUserMsg.content.replace(/^\[Rating:.*?\]\s*/, "")}
+              </p>
+            )}
+
+
+            {requestError && (
+              <p className="w-full rounded-xl border border-[#8B5A5A]/30 bg-[#8B5A5A]/10 px-3 py-2 text-center text-xs text-[#D4CEBD]">
+                {requestError}
               </p>
             )}
           </>
@@ -571,7 +660,7 @@ export default function VoicePage() {
               startListening();
             }}
             disabled={!canStartTalking}
-            className="px-5 h-12 rounded-2xl transition-all duration-300 flex items-center justify-center gap-2 shadow-lg disabled:opacity-30 bg-[#B2AC88]/20 hover:bg-[#B2AC88]/30 border border-[#B2AC88]/30 text-[#F5F0E8]"
+            className="ip-primary-button h-12 px-5 transition-all duration-300 disabled:opacity-30"
             type="button"
           >
             <Mic size={18} className="text-[#B2AC88]" />
@@ -581,10 +670,10 @@ export default function VoicePage() {
           <button
             onClick={stopListeningAndSubmit}
             disabled={!canStopTalking}
-            className="px-5 h-12 rounded-2xl transition-all duration-300 flex items-center justify-center gap-2 shadow-lg disabled:opacity-30 bg-[#8B5A5A]/20 hover:bg-[#8B5A5A]/30 border border-[#8B5A5A]/30 text-[#F5F0E8]"
+            className="ip-secondary-button h-12 px-5 transition-all duration-300 disabled:opacity-30"
             type="button"
           >
-            <MicOff size={18} className="text-[#D4CEBD]" />
+            <MicOff size={18} />
             Stop talking
           </button>
         </div>

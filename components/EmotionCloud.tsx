@@ -13,7 +13,7 @@ export default function EmotionCloud({ emotions }: { emotions: string[] }) {
         <span key={emotion}
           className="px-3 py-1.5 rounded-full border text-sm transition-all"
           style={{
-            borderColor: "#B2AC8850",
+            borderColor: "#F2D46170",
             color: "#D4CEBD",
             fontSize: `${Math.min(1, 0.75 + count * 0.08)}rem`,
             opacity: Math.min(1, 0.5 + count * 0.15),
