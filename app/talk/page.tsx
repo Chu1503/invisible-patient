@@ -449,6 +449,7 @@ export default function TalkPage() {
             <input
               ref={inputRef}
               value={input}
+              maxLength={6000}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {

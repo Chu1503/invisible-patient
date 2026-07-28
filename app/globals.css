@@ -2055,6 +2055,10 @@ select:focus-visible {
   transition: transform 150ms ease, opacity 150ms ease;
 }
 
+.auth-google-submit {
+  width: 100%;
+}
+
 .auth-submit:hover:not(:disabled),
 .setup-next:hover:not(:disabled) {
   transform: translateY(-1px);

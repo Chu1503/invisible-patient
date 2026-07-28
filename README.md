@@ -30,7 +30,13 @@ If a user expresses crisis language or suicidal thoughts, the app immediately su
 Users can speak instead of typing. Speech recognition captures the user input, and the AI can respond with spoken output for a more accessible and natural experience.
 
 ### 6. Anonymous peer support forum
-The app includes a private anonymous community space where caregivers can post, reply, and connect with others at similar caregiving stages.
+The current Circle experience is a local product preview with sample
+conversations. Posts added there stay in the current browser; it is not yet a
+live shared community.
+
+### 7. Care tasks
+Caregivers can create one-time or recurring care tasks and receive in-app
+reminders while the application is open.
 
 ## Key features
 
@@ -39,9 +45,10 @@ The app includes a private anonymous community space where caregivers can post, 
 - Crisis signal detection and immediate support resources
 - Emotional trend visualization
 - Voice and text interaction modes
-- Anonymous caregiver forum
-- No account required
-- Fully local data storage for privacy-focused usage
+- Google account authentication
+- Account-isolated cloud storage with database Row Level Security
+- Local preview of the planned caregiver community
+- One-time and recurring care tasks with in-app reminders
 
 ## How it works
 
@@ -65,10 +72,10 @@ When the session ends, the frontend analyzes the conversation to estimate:
 The result is saved locally and used to update the dashboard and visualizations.
 
 ### Account-backed privacy architecture
-Supabase Auth provides verified email/password accounts and cookie-based
-sessions. Caregiver profiles, care-recipient details, check-ins, chat messages,
-care events, action plans, tasks, and follow-ups are stored in Postgres. Row
-Level Security restricts every personal row to its owning account.
+Supabase Auth provides Google OAuth accounts and cookie-based sessions.
+Caregiver profiles, care-recipient details, check-ins, chat messages, care
+events, action plans, tasks, and follow-ups are stored in Postgres. Row Level
+Security restricts every personal row to its owning account.
 
 The browser keeps a temporary local cache for a responsive interface. Supabase
 is the durable source of truth after sign-in. The Anthropic API remains behind a
@@ -92,11 +99,11 @@ server route and its API key is never sent to the browser.
 ### Styling and utilities
 - clsx
 - tailwind-merge
-- Google Fonts
+- Self-hosted Geist font
 
 ### Storage
 - Supabase Postgres for account-owned caregiver and care-workflow data
-- `localStorage` as a per-session responsive cache
+- `localStorage` as a responsive browser cache
 - Local-only forum seed and draft state in the current MVP
 
 ## Account setup
@@ -104,6 +111,10 @@ server route and its API key is never sent to the browser.
 See [SUPABASE_SETUP.md](./SUPABASE_SETUP.md) for the database migration,
 authentication callback URLs, local environment variables, Vercel
 configuration, testing checklist, and security boundaries.
+
+See [YC_LAUNCH_CHECKLIST.md](./YC_LAUNCH_CHECKLIST.md) for the current
+submission checklist, product-truthfulness review, security priorities, and
+post-YC engineering work.
 
 ## Architecture overview
 

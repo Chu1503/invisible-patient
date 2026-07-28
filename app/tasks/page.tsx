@@ -103,9 +103,9 @@ function recurrenceLabel(recurrence?: CareTask["recurrence"]): string {
 
 function reminderLabel(minutes?: number | null): string {
   if (minutes == null) return "";
-  if (minutes === 0) return "Reminder at due time";
-  if (minutes === 60) return "Reminder 1 hour before";
-  return `Reminder ${minutes} minutes before`;
+  if (minutes === 0) return "In-app reminder at due time";
+  if (minutes === 60) return "In-app reminder 1 hour before";
+  return `In-app reminder ${minutes} minutes before`;
 }
 
 export default function TasksPage() {
@@ -371,7 +371,7 @@ export default function TasksPage() {
                 </select>
               </label>
               <label className="task-field">
-                <span>Reminder</span>
+                <span>In-app reminder</span>
                 <select
                   value={draft.reminderMinutes}
                   onChange={(event) =>
@@ -480,8 +480,8 @@ export default function TasksPage() {
         )}
 
         <p className="tasks-safety-note">
-          Care tasks are organizational reminders, not emergency alerts or
-          medical instructions.
+          Reminders appear while this app is open. Care tasks are not emergency
+          alerts or medical instructions.
         </p>
       </div>
     </main>

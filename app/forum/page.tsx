@@ -128,8 +128,8 @@ export default function ForumPage() {
         </header>
 
         <div className="circle-summary">
-          34 caregivers shared that nighttime restlessness got harder. You are
-          not alone in those 3am moments.
+          Community preview. Sample conversations and anything you add stay on
+          this browser while moderated community access is being prepared.
         </div>
 
         <section className="circle-timeline">
@@ -171,6 +171,7 @@ export default function ForumPage() {
 
             <textarea
               value={newPost}
+              maxLength={2000}
               onChange={(event) => setNewPost(event.target.value)}
               placeholder="Share what is on your mind"
               rows={3}
@@ -186,7 +187,7 @@ export default function ForumPage() {
                 className="circle-share-button"
                 type="button"
               >
-                Share with the circle
+                Add to preview
               </button>
             </div>
           </div>
@@ -259,6 +260,7 @@ export default function ForumPage() {
                         <div className="circle-reply-composer">
                           <textarea
                             value={replyText}
+                            maxLength={2000}
                             onChange={(event) => setReplyText(event.target.value)}
                             placeholder="Write a response"
                             rows={2}

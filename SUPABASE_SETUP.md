@@ -28,7 +28,7 @@ Every table has RLS policies that compare `auth.uid()` with the row owner.
 The second migration adds recurring care-task schedules, reminder timing, and
 completion timestamps. It is safe to run once after the initial migration.
 
-## 3. Configure authentication
+## 3. Configure Google-only authentication
 
 In **Authentication → URL Configuration**:
 
@@ -38,21 +38,42 @@ In **Authentication → URL Configuration**:
 - For local development, also add:
   `http://localhost:3000/auth/callback`
 
-In **Authentication → Providers → Email**:
+When the custom domain is connected, change the Site URL to
+`https://invisible-patient.com` and add:
 
-- Keep email/password enabled.
-- Keep email confirmation enabled for production.
+- `https://invisible-patient.com/auth/callback`
 
-Before a public launch, configure a branded SMTP provider. Supabase's shared
-development email service is limited to a very small number of messages and is
-not intended for production delivery. A free Resend account works for early
-testing after you verify a sending domain:
+In the Google Auth Platform console:
 
-- Host: `smtp.resend.com`
-- Port: `465`
-- Username: `resend`
-- Password: your Resend API key
-- Sender: an address on your verified sending domain
+1. Create or select a Google Cloud project.
+2. Configure the OAuth consent screen and choose the appropriate audience.
+3. Create an OAuth client with application type **Web application**.
+4. Add these authorized JavaScript origins:
+   - `https://invisible-patient.vercel.app`
+   - `http://localhost:3000`
+   - `https://invisible-patient.com` after the domain is connected
+5. Add the Supabase callback shown on the Google provider page as an authorized
+   redirect URI. It has this format:
+   `https://YOUR_PROJECT_REF.supabase.co/auth/v1/callback`
+6. Copy the Google Client ID and Client Secret.
+
+In **Supabase → Authentication → Sign In / Providers → Google**:
+
+1. Enable Google.
+2. Paste the Client ID and Client Secret.
+3. Save.
+
+In **Supabase → Authentication → Sign In / Providers → Email**, disable the
+email provider so Google is the only account entry method.
+
+The Google Client Secret belongs in Supabase. It is not a Vercel environment
+variable and must never be added to browser code.
+
+If a verified email/password account already exists, signing in with the same
+Google email should automatically link the Google identity to that existing
+Supabase user. Verify that the user ID and saved records remain unchanged before
+removing any old identity. See the
+[Supabase identity-linking guide](https://supabase.com/docs/guides/auth/auth-identity-linking).
 
 ## 4. Add local environment variables
 
@@ -75,16 +96,17 @@ than a broad wildcard when possible.
 
 ## 6. Test the flow
 
-1. Create a new account.
-2. Open the verification email and return through `/auth/callback`.
-3. Complete all five setup screens.
+1. Select **Continue with Google**.
+2. Approve the Google consent screen and return through `/auth/callback`.
+3. Confirm a first-time Google user is directed to the setup screens.
 4. Confirm the Home and Profile pages show the saved name, ZIP code, and client.
 5. Sign out and sign back in from another browser.
-6. Confirm Profile, Insights, and Revisit data return.
-7. Start a Talk session, sign out, then sign back in and confirm its metrics are
+6. Confirm the returning Google user goes directly to Home.
+7. Confirm Profile, Insights, and Revisit data return.
+8. Start a Talk session, sign out, then sign back in and confirm its metrics are
    present in Insights. Chat messages are stored, but no previous-chat UI is
    exposed yet.
-8. Add a one-time and a recurring care task, mark each complete, reload, and
+9. Add a one-time and a recurring care task, mark each complete, reload, and
    confirm the one-time task stays completed while the recurring task advances
    to its next due date.
 
