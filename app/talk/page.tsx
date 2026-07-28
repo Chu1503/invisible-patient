@@ -73,6 +73,7 @@ export default function TalkPage() {
   }, []);
 
   useEffect(() => {
+    if (messages.length === 1 && pendingZbiQ < 0) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, pendingZbiQ]);
 
