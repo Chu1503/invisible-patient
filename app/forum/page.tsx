@@ -1,16 +1,29 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Check, ChevronDown, Heart, MessageCircle } from "lucide-react";
+import {
+  Check,
+  ChevronDown,
+  Heart,
+  MessageCircle,
+  Pencil,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
 import Navbar from "@/components/Navbar";
 import {
   createPost,
   createReply,
+  deleteForumPost,
+  deleteForumReply,
   detectCrisis,
   formatTimeAgo,
   getCircleTopics,
   getForumFeed,
   togglePostLike,
+  updateForumPost,
+  updateForumReply,
   type ForumPost,
 } from "@/lib/forum";
 
@@ -29,6 +42,11 @@ const CRISIS_RESOURCES = (
   </div>
 );
 
+type EditingItem = {
+  kind: "post" | "reply";
+  id: string;
+};
+
 export default function ForumPage() {
   const [posts, setPosts] = useState<ForumPost[]>([]);
   const [topics, setTopics] = useState<string[]>([]);
@@ -42,6 +60,10 @@ export default function ForumPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [feedError, setFeedError] = useState("");
+  const [editingItem, setEditingItem] = useState<EditingItem | null>(null);
+  const [editText, setEditText] = useState("");
+  const [workingItem, setWorkingItem] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<EditingItem | null>(null);
 
   useEffect(() => {
     const availableTopics = getCircleTopics();
@@ -70,6 +92,20 @@ export default function ForumPage() {
     }, 15_000);
     return () => window.clearInterval(interval);
   }, [loadFeed]);
+
+  useEffect(() => {
+    if (!deleteTarget) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !workingItem) setDeleteTarget(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [deleteTarget, workingItem]);
 
   async function submitPost() {
     if (!newPost.trim() || !selectedTopic || submitting) return;
@@ -125,6 +161,67 @@ export default function ForumPage() {
     } catch {
       setFeedError("That reaction could not be saved.");
       await loadFeed(true);
+    }
+  }
+
+  function beginEditing(
+    kind: EditingItem["kind"],
+    id: string,
+    content: string
+  ) {
+    setEditingItem({ kind, id });
+    setEditText(content);
+    setReplyingTo(null);
+    setFeedError("");
+  }
+
+  async function saveEdit() {
+    if (!editingItem || !editText.trim() || workingItem) return;
+    const key = `edit-${editingItem.kind}-${editingItem.id}`;
+    setWorkingItem(key);
+    try {
+      if (editingItem.kind === "post") {
+        await updateForumPost(editingItem.id, editText.trim());
+      } else {
+        await updateForumReply(editingItem.id, editText.trim());
+      }
+      setEditingItem(null);
+      setEditText("");
+      await loadFeed(true);
+    } catch {
+      setFeedError("Your changes could not be saved. Please try again.");
+    } finally {
+      setWorkingItem("");
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || workingItem) return;
+    const { kind, id } = deleteTarget;
+
+    const key = `delete-${kind}-${id}`;
+    setWorkingItem(key);
+    try {
+      if (kind === "post") {
+        await deleteForumPost(id);
+        if (expandedPost === id) setExpandedPost(null);
+      } else {
+        await deleteForumReply(id);
+      }
+      if (editingItem?.id === id) {
+        setEditingItem(null);
+        setEditText("");
+      }
+      setDeleteTarget(null);
+      await loadFeed(true);
+    } catch {
+      setFeedError(
+        kind === "post"
+          ? "This post could not be deleted."
+          : "This response could not be deleted."
+      );
+    } finally {
+      setWorkingItem("");
     }
   }
 
@@ -232,15 +329,60 @@ export default function ForumPage() {
               return (
                 <article key={post.id} className="circle-post">
                   <div className="circle-post-meta">
-                    <div>
+                    <div className="circle-post-author">
                       <span>{post.authorTag}</span>
                       <span>{post.careStage}</span>
                     </div>
-                    <time>{formatTimeAgo(post.timestamp)}</time>
+                    <div className="circle-post-controls">
+                      <div className="circle-time-meta">
+                        <time>{formatTimeAgo(post.timestamp)}</time>
+                        {post.editedAt && <span>Edited</span>}
+                      </div>
+                      {post.isOwned && (
+                        <div className="circle-owner-actions">
+                          <button
+                            type="button"
+                            aria-label="Edit post"
+                            disabled={Boolean(workingItem)}
+                            onClick={() =>
+                              beginEditing("post", post.id, post.content)
+                            }
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Delete post"
+                            disabled={Boolean(workingItem)}
+                            onClick={() =>
+                              setDeleteTarget({ kind: "post", id: post.id })
+                            }
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <p className="circle-post-copy">{post.content}</p>
-                  {post.hasCrisis && CRISIS_RESOURCES}
+                  {editingItem?.kind === "post" &&
+                  editingItem.id === post.id ? (
+                    <CircleEditComposer
+                      value={editText}
+                      saving={workingItem === `edit-post-${post.id}`}
+                      onChange={setEditText}
+                      onCancel={() => {
+                        setEditingItem(null);
+                        setEditText("");
+                      }}
+                      onSave={() => void saveEdit()}
+                    />
+                  ) : (
+                    <>
+                      <p className="circle-post-copy">{post.content}</p>
+                      {post.hasCrisis && CRISIS_RESOURCES}
+                    </>
+                  )}
 
                   <div className="circle-actions">
                     <button
@@ -283,9 +425,62 @@ export default function ForumPage() {
                         >
                           <div className="circle-reply-meta">
                             <span>{reply.authorTag}</span>
-                            <time>{formatTimeAgo(reply.timestamp)}</time>
+                            <div className="circle-reply-controls">
+                              <div className="circle-time-meta">
+                                <time>{formatTimeAgo(reply.timestamp)}</time>
+                                {reply.editedAt && <span>Edited</span>}
+                              </div>
+                              {reply.isOwned && (
+                                <div className="circle-owner-actions">
+                                  <button
+                                    type="button"
+                                    aria-label="Edit response"
+                                    disabled={Boolean(workingItem)}
+                                    onClick={() =>
+                                      beginEditing(
+                                        "reply",
+                                        reply.id,
+                                        reply.content
+                                      )
+                                    }
+                                  >
+                                    <Pencil size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label="Delete response"
+                                    disabled={Boolean(workingItem)}
+                                    onClick={() =>
+                                      setDeleteTarget({
+                                        kind: "reply",
+                                        id: reply.id,
+                                      })
+                                    }
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </div>
-                          <p>{reply.content}</p>
+                          {editingItem?.kind === "reply" &&
+                          editingItem.id === reply.id ? (
+                            <CircleEditComposer
+                              value={editText}
+                              saving={
+                                workingItem === `edit-reply-${reply.id}`
+                              }
+                              compact
+                              onChange={setEditText}
+                              onCancel={() => {
+                                setEditingItem(null);
+                                setEditText("");
+                              }}
+                              onSave={() => void saveEdit()}
+                            />
+                          ) : (
+                            <p>{reply.content}</p>
+                          )}
                         </div>
                       ))}
 
@@ -328,6 +523,96 @@ export default function ForumPage() {
           </div>
         </section>
       </div>
+
+      {deleteTarget && (
+        <div
+          className="circle-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !workingItem) {
+              setDeleteTarget(null);
+            }
+          }}
+        >
+          <div
+            className="circle-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="circle-delete-title"
+            aria-describedby="circle-delete-description"
+          >
+            <h2 id="circle-delete-title">
+              Delete {deleteTarget.kind === "post" ? "post" : "response"}?
+            </h2>
+            <p id="circle-delete-description">
+              {deleteTarget.kind === "post"
+                ? "This will permanently remove the post, its responses, and its reactions."
+                : "This response will be permanently removed."}
+            </p>
+            <div>
+              <button
+                type="button"
+                autoFocus
+                disabled={Boolean(workingItem)}
+                onClick={() => setDeleteTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(workingItem)}
+                onClick={() => void confirmDelete()}
+              >
+                <Trash2 size={14} />
+                {workingItem ? "Deleting" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+function CircleEditComposer({
+  value,
+  saving,
+  compact = false,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  value: string;
+  saving: boolean;
+  compact?: boolean;
+  onChange: (value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className={`circle-edit-composer ${compact ? "is-compact" : ""}`}>
+      <textarea
+        value={value}
+        maxLength={2000}
+        rows={compact ? 2 : 3}
+        aria-label={compact ? "Edit response" : "Edit post"}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {detectCrisis(value) && CRISIS_RESOURCES}
+      <div className="circle-edit-actions">
+        <button type="button" onClick={onCancel} disabled={saving}>
+          <X size={14} />
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!value.trim() || saving}
+        >
+          <Save size={14} />
+          {saving ? "Saving" : "Save changes"}
+        </button>
+      </div>
+    </div>
   );
 }

@@ -12,6 +12,8 @@ export interface ForumPost {
   replies: ForumReply[];
   hasCrisis: boolean;
   likes: number;
+  isOwned: boolean;
+  editedAt?: number;
 }
 
 export interface ForumReply {
@@ -20,6 +22,8 @@ export interface ForumReply {
   timestamp: number;
   authorTag: string;
   isAI: boolean;
+  isOwned: boolean;
+  editedAt?: number;
 }
 
 export interface ForumFeed {
@@ -71,6 +75,7 @@ type ReplyRow = {
   content: string;
   anonymous_tag: string;
   created_at: string;
+  edited_at: string | null;
 };
 
 type PostRow = {
@@ -79,8 +84,14 @@ type PostRow = {
   topic: string;
   anonymous_tag: string;
   created_at: string;
+  edited_at: string | null;
   likes_count: number;
   circle_replies: ReplyRow[] | null;
+};
+
+type OwnedContentRow = {
+  content_type: "post" | "reply";
+  content_id: string;
 };
 
 function stableHash(value: string): number {
@@ -136,7 +147,7 @@ export async function getForumFeed(): Promise<ForumFeed> {
   const { data, error } = await supabase
     .from("circle_posts")
     .select(
-      "id, content, topic, anonymous_tag, created_at, likes_count, circle_replies(id, content, anonymous_tag, created_at)"
+      "id, content, topic, anonymous_tag, created_at, edited_at, likes_count, circle_replies(id, content, anonymous_tag, created_at, edited_at)"
     )
     .order("created_at", { ascending: false })
     .limit(50);
@@ -146,6 +157,21 @@ export async function getForumFeed(): Promise<ForumFeed> {
   const rows = (data ?? []) as PostRow[];
   const postIds = rows.map((row) => row.id);
   let likedPostIds = new Set<string>();
+  const { data: ownedContent, error: ownershipError } = await supabase.rpc(
+    "get_my_circle_content_ids"
+  );
+  if (ownershipError) throw ownershipError;
+  const ownedRows = (ownedContent ?? []) as OwnedContentRow[];
+  const ownedPostIds = new Set(
+    ownedRows
+      .filter((row) => row.content_type === "post")
+      .map((row) => row.content_id)
+  );
+  const ownedReplyIds = new Set(
+    ownedRows
+      .filter((row) => row.content_type === "reply")
+      .map((row) => row.content_id)
+  );
 
   if (postIds.length) {
     const { data: likes, error: likesError } = await supabase
@@ -166,6 +192,10 @@ export async function getForumFeed(): Promise<ForumFeed> {
     careStage: row.topic,
     hasCrisis: detectCrisis(row.content),
     likes: row.likes_count,
+    isOwned: ownedPostIds.has(row.id),
+    editedAt: row.edited_at
+      ? new Date(row.edited_at).getTime()
+      : undefined,
     replies: (row.circle_replies ?? [])
       .map((reply) => ({
         id: reply.id,
@@ -173,6 +203,10 @@ export async function getForumFeed(): Promise<ForumFeed> {
         timestamp: new Date(reply.created_at).getTime(),
         authorTag: reply.anonymous_tag,
         isAI: false,
+        isOwned: ownedReplyIds.has(reply.id),
+        editedAt: reply.edited_at
+          ? new Date(reply.edited_at).getTime()
+          : undefined,
       }))
       .sort((a, b) => a.timestamp - b.timestamp),
   }));
@@ -212,6 +246,42 @@ export async function togglePostLike(
     ? createClient().from("circle_likes").delete().eq("post_id", postId)
     : createClient().from("circle_likes").insert({ post_id: postId });
   const { error } = await request;
+  if (error) throw error;
+}
+
+export async function updateForumPost(
+  postId: string,
+  content: string
+): Promise<void> {
+  const { error } = await createClient().rpc("update_circle_post", {
+    p_post_id: postId,
+    p_content: content,
+  });
+  if (error) throw error;
+}
+
+export async function updateForumReply(
+  replyId: string,
+  content: string
+): Promise<void> {
+  const { error } = await createClient().rpc("update_circle_reply", {
+    p_reply_id: replyId,
+    p_content: content,
+  });
+  if (error) throw error;
+}
+
+export async function deleteForumPost(postId: string): Promise<void> {
+  const { error } = await createClient().rpc("delete_circle_post", {
+    p_post_id: postId,
+  });
+  if (error) throw error;
+}
+
+export async function deleteForumReply(replyId: string): Promise<void> {
+  const { error } = await createClient().rpc("delete_circle_reply", {
+    p_reply_id: replyId,
+  });
   if (error) throw error;
 }
 

@@ -23,14 +23,17 @@ Do not copy the secret or service-role key into this project or Vercel.
    `supabase/migrations/202607280001_care_task_reminders.sql`.
 5. Then copy and run
    `supabase/migrations/202607280002_shared_circle.sql`.
+6. Then copy and run
+   `supabase/migrations/202607280003_circle_edit_delete.sql`.
 
 The migration creates account-owned tables for profiles, care recipients,
 check-ins and chat messages, care events, action plans, tasks, and follow-ups.
 Every table has RLS policies that compare `auth.uid()` with the row owner.
 The second migration adds recurring care-task schedules, reminder timing, and
 completion timestamps. The third adds shared Circle posts, responses, reactions,
-and secure account ownership policies. Each migration is safe to run once in
-the listed order.
+and secure account ownership policies. The fourth adds owner only editing and
+deletion without exposing account identifiers in the feed. Each migration is
+safe to run once in the listed order.
 
 ## 3. Configure Google-only authentication
 
