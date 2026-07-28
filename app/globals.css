@@ -760,7 +760,14 @@ select:focus-visible {
 .profile-avatar {
   width: 78px;
   height: 78px;
-  font-size: 30px;
+  overflow: hidden;
+  background: transparent;
+}
+
+.profile-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .profile-identity-main h2 {
@@ -2321,39 +2328,22 @@ select:focus-visible {
   font-weight: 680;
 }
 
-.site-footer {
-  border-top: 1px solid rgba(249, 250, 247, 0.12);
-  background: var(--ip-ink);
-  color: var(--ip-paper);
-  padding: 22px 18px;
-}
-
-.site-footer-inner {
+.profile-legal-links {
   display: flex;
-  width: min(100%, 1100px);
   align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  margin: 0 auto;
+  justify-content: center;
+  gap: 20px;
+  padding: 30px 16px 2px;
   font-size: 11px;
 }
 
-.site-footer-inner > span {
-  color: rgba(249, 250, 247, 0.58);
+.profile-legal-links a {
+  color: var(--ip-muted);
+  transition: color 150ms ease;
 }
 
-.site-footer nav {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 18px;
-}
-
-.site-footer a {
-  color: var(--ip-paper);
-}
-
-.site-footer a:hover {
-  color: var(--ip-yellow);
+.profile-legal-links a:hover {
+  color: var(--ip-ink);
 }
 
 .setup-page {
@@ -2712,11 +2702,6 @@ select:focus-visible {
     margin-top: 24px;
     border-radius: 22px;
     padding: 26px 21px;
-  }
-
-  .site-footer-inner {
-    align-items: flex-start;
-    flex-direction: column;
   }
 
   .auth-heading {

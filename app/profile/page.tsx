@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import {
   Check,
@@ -207,10 +208,6 @@ export default function ProfilePage() {
     .slice(0, 3);
   const profileName =
     profile?.displayName || profileDraft.displayName || "Your profile";
-  const profileInitial =
-    profileName === "Your profile"
-      ? "?"
-      : profileName.trim().charAt(0).toUpperCase();
   const clientInitial =
     activeRecipient?.clientCode.trim().charAt(0).toUpperCase() || "C";
 
@@ -281,7 +278,13 @@ export default function ProfilePage() {
           <section className="profile-identity-card">
             <div className="profile-identity-main">
               <div className="profile-avatar" aria-hidden="true">
-                {profileInitial}
+                <Image
+                  src="/invisible-patient-logo.png"
+                  alt=""
+                  width={256}
+                  height={256}
+                  priority
+                />
               </div>
               <div className="min-w-0 flex-1">
                 <h2>{profileName}</h2>
@@ -517,6 +520,11 @@ export default function ProfilePage() {
             )}
           </section>
         </div>
+
+        <nav className="profile-legal-links" aria-label="Legal">
+          <Link href="/privacy">Privacy Policy</Link>
+          <Link href="/terms">Terms and Conditions</Link>
+        </nav>
       </div>
     </main>
   );
