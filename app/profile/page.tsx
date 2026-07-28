@@ -73,6 +73,7 @@ export default function ProfilePage() {
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingRecipient, setEditingRecipient] = useState(false);
+  const [editingCare, setEditingCare] = useState(false);
   const [profileDraft, setProfileDraft] =
     useState<ProfileDraft>(emptyProfile);
   const [recipientDraft, setRecipientDraft] =
@@ -184,6 +185,22 @@ export default function ProfilePage() {
     refresh();
   }
 
+  function submitCare(event: React.FormEvent) {
+    event.preventDefault();
+    setSaveError("");
+    if (!activeRecipient) {
+      setSaveError("Add client information before saving care notes.");
+      return;
+    }
+
+    saveCareRecipient({
+      ...activeRecipient,
+      careNotes: recipientDraft.careNotes.trim(),
+    });
+    setEditingCare(false);
+    refresh();
+  }
+
   async function signOut() {
     setSigningOut(true);
     await signOutCurrentDevice();
@@ -237,45 +254,10 @@ export default function ProfilePage() {
         )}
 
         <div className="ip-connected-list">
-          <section className="profile-tasks-card">
-            <div className="profile-section-header">
-              <h2>Care tasks</h2>
-              <Link href="/tasks" className="profile-tasks-manage">
-                Manage
-                <ChevronRight size={14} />
-              </Link>
-            </div>
-
-            {nextCareTasks.length ? (
-              <div className="profile-tasks-list">
-                {nextCareTasks.map((task) => (
-                  <div className="profile-task-item" key={task.id}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        completeCareTask(task.id);
-                        refresh();
-                      }}
-                      aria-label={`Mark ${task.title} complete`}
-                    >
-                      <Check size={14} />
-                    </button>
-                    <div>
-                      <p>{task.title}</p>
-                      <span>{profileTaskDueLabel(task.dueAt)}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="profile-tasks-empty">
-                <ListChecks size={18} />
-                <p>No care tasks yet.</p>
-              </div>
-            )}
-          </section>
-
           <section className="profile-identity-card">
+            <div className="profile-section-header">
+              <h2>Your information</h2>
+            </div>
             <div className="profile-identity-main">
               <div className="profile-avatar" aria-hidden="true">
                 <Image
@@ -287,7 +269,7 @@ export default function ProfilePage() {
                 />
               </div>
               <div className="min-w-0 flex-1">
-                <h2>{profileName}</h2>
+                <h3>{profileName}</h3>
                 <p>
                   <MapPin size={14} />
                   {profile?.zipCode ||
@@ -348,11 +330,15 @@ export default function ProfilePage() {
 
           <section className="profile-client-card">
             <div className="profile-section-header">
-              <h2>Client Profile</h2>
+              <h2>Client information</h2>
               {activeRecipient && !editingRecipient && (
                 <button
                   type="button"
-                  onClick={() => setEditingRecipient(true)}
+                  onClick={() => {
+                    refresh();
+                    setEditingCare(false);
+                    setEditingRecipient(true);
+                  }}
                   className="profile-edit-button"
                   aria-label="Edit client"
                 >
@@ -426,21 +412,6 @@ export default function ProfilePage() {
                     ))}
                   </select>
                 </label>
-                <label className="sm:col-span-2">
-                  <span className={labelClass}>Care notes</span>
-                  <textarea
-                    className={`${inputClass} min-h-28 resize-y`}
-                    value={recipientDraft.careNotes}
-                    onChange={(event) =>
-                      setRecipientDraft({
-                        ...recipientDraft,
-                        careNotes: event.target.value,
-                      })
-                    }
-                    placeholder="Anything useful to remember, such as mobility needs, known triggers, communication preferences, or other care context."
-                    maxLength={5000}
-                  />
-                </label>
                 <button
                   type="submit"
                   className="profile-save-button sm:col-span-2"
@@ -463,17 +434,66 @@ export default function ProfilePage() {
                     </span>
                   </div>
                 </div>
-
-                <div className="profile-info-grid profile-info-grid-simple">
-                  <Info
-                    label="Care notes"
-                    value={activeRecipient.careNotes || "Nothing added yet"}
-                  />
-                </div>
               </div>
             ) : (
               <p className="py-8 text-center text-xs text-[#A09890]">
                 Add a client profile to begin.
+              </p>
+            )}
+          </section>
+
+          <section className="profile-care-card">
+            <div className="profile-section-header">
+              <h2>Care</h2>
+              {activeRecipient && !editingCare && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    refresh();
+                    setEditingRecipient(false);
+                    setEditingCare(true);
+                  }}
+                  className="profile-edit-button"
+                  aria-label="Edit care notes"
+                >
+                  <Pencil size={15} />
+                  Edit
+                </button>
+              )}
+            </div>
+
+            {editingCare ? (
+              <form onSubmit={submitCare}>
+                <label>
+                  <span className={labelClass}>Care notes</span>
+                  <textarea
+                    className={`${inputClass} min-h-28 resize-y`}
+                    value={recipientDraft.careNotes}
+                    onChange={(event) =>
+                      setRecipientDraft({
+                        ...recipientDraft,
+                        careNotes: event.target.value,
+                      })
+                    }
+                    placeholder="Anything useful to remember, such as mobility needs, known triggers, communication preferences, or other care context."
+                    maxLength={5000}
+                  />
+                </label>
+                <button type="submit" className="profile-save-button mt-3 w-full">
+                  <Save size={14} />
+                  Save care notes
+                </button>
+              </form>
+            ) : activeRecipient ? (
+              <div className="profile-info-grid profile-info-grid-simple">
+                <Info
+                  label="Care notes"
+                  value={activeRecipient.careNotes || "Nothing added yet"}
+                />
+              </div>
+            ) : (
+              <p className="py-8 text-center text-xs text-[#A09890]">
+                Add client information before adding care notes.
               </p>
             )}
           </section>
@@ -517,6 +537,44 @@ export default function ProfilePage() {
               <p className="profile-followups-empty">
                 Nothing needs another check right now.
               </p>
+            )}
+          </section>
+
+          <section className="profile-tasks-card">
+            <div className="profile-section-header">
+              <h2>Care tasks</h2>
+              <Link href="/tasks" className="profile-tasks-manage">
+                Manage
+                <ChevronRight size={14} />
+              </Link>
+            </div>
+
+            {nextCareTasks.length ? (
+              <div className="profile-tasks-list">
+                {nextCareTasks.map((task) => (
+                  <div className="profile-task-item" key={task.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        completeCareTask(task.id);
+                        refresh();
+                      }}
+                      aria-label={`Mark ${task.title} complete`}
+                    >
+                      <Check size={14} />
+                    </button>
+                    <div>
+                      <p>{task.title}</p>
+                      <span>{profileTaskDueLabel(task.dueAt)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="profile-tasks-empty">
+                <ListChecks size={18} />
+                <p>No care tasks yet.</p>
+              </div>
             )}
           </section>
         </div>
