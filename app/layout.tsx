@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import AccountDataGate from "@/components/AccountDataGate";
+import SiteFooter from "@/components/SiteFooter";
 import TaskReminderManager from "@/components/TaskReminderManager";
 import "./globals.css";
 
@@ -16,6 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <TaskReminderManager />
           {children}
         </AccountDataGate>
+        <SiteFooter />
       </body>
     </html>
   );

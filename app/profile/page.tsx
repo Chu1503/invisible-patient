@@ -12,9 +12,7 @@ import {
   Pencil,
   Save,
 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
-import { clearAccountCache } from "@/lib/cloud-sync";
 import {
   completeCareTask,
   completeFollowUp,
@@ -35,7 +33,7 @@ import {
   LIVING_SITUATIONS,
   getStagesForCondition,
 } from "@/lib/profile-options";
-import { createClient } from "@/lib/supabase/client";
+import { signOutCurrentDevice } from "@/lib/sign-out";
 
 type ProfileDraft = Pick<CaregiverProfile, "displayName" | "zipCode">;
 type RecipientDraft = Pick<
@@ -66,7 +64,6 @@ const emptyRecipient: RecipientDraft = {
 };
 
 export default function ProfilePage() {
-  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [profile, setProfile] = useState<CaregiverProfile | null>(null);
   const [activeRecipient, setActiveRecipient] =
@@ -188,15 +185,7 @@ export default function ProfilePage() {
 
   async function signOut() {
     setSigningOut(true);
-    const { error } = await createClient().auth.signOut();
-    if (error) {
-      setSaveError("We could not sign you out. Please try again.");
-      setSigningOut(false);
-      return;
-    }
-    clearAccountCache();
-    router.replace("/auth");
-    router.refresh();
+    await signOutCurrentDevice();
   }
 
   if (!mounted) {

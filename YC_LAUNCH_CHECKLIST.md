@@ -1,6 +1,6 @@
 # The Invisible Patient — YC Launch Readiness
 
-Last reviewed: July 27, 2026
+Last reviewed: July 28, 2026
 
 This document separates what is already implemented from what still needs to
 happen before the YC submission and what can wait until an external pilot.
@@ -21,6 +21,10 @@ happen before the YC submission and what can wait until an external pilot.
   reminders.
 - [x] Added stricter AI and workflow request-size limits.
 - [x] Added a clear server response when the Anthropic API key is missing.
+- [x] Added public Privacy Policy and Terms of Service pages.
+- [x] Added Privacy Policy and Terms of Service links to the global footer.
+- [x] Added friendly account loading recovery with silent retries.
+- [x] Made current device sign out complete even when the network stalls.
 
 ## Required before recording or submitting to YC
 
@@ -106,8 +110,9 @@ Do not claim:
 - [ ] Test database Row Level Security with two separate accounts.
 - [ ] Add account deletion and data export.
 - [ ] Add a written chat-retention and deletion policy.
-- [ ] Add Terms, Privacy Policy, AI-processing consent and a clear healthcare
-  disclaimer.
+- [x] Add public Terms and Privacy Policy pages.
+- [ ] Add affirmative AI processing consent, obtain final legal review, and
+  confirm the healthcare disclaimer language.
 
 ### Current strengths
 

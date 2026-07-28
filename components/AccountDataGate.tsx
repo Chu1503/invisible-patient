@@ -2,17 +2,26 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { Database, RefreshCw } from "lucide-react";
+import { CloudOff, LogOut, RefreshCw } from "lucide-react";
 import type { AuthChangeEvent } from "@supabase/supabase-js";
 import {
+  AccountAuthenticationRequiredError,
   clearAccountCache,
   hydrateAccountData,
 } from "@/lib/cloud-sync";
+import { signOutCurrentDevice } from "@/lib/sign-out";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
+const HYDRATION_RETRY_DELAYS = [250, 700];
+
 function doesNotNeedHydration(pathname: string): boolean {
-  return pathname.startsWith("/auth") || pathname === "/setup";
+  return (
+    pathname.startsWith("/auth") ||
+    pathname === "/setup" ||
+    pathname === "/privacy" ||
+    pathname === "/terms"
+  );
 }
 
 export default function AccountDataGate({
@@ -24,6 +33,7 @@ export default function AccountDataGate({
   const router = useRouter();
   const [ready, setReady] = useState(doesNotNeedHydration(pathname));
   const [error, setError] = useState("");
+  const [signingOut, setSigningOut] = useState(false);
 
   const hydrate = useCallback(async () => {
     if (doesNotNeedHydration(pathname) || !isSupabaseConfigured()) {
@@ -33,17 +43,32 @@ export default function AccountDataGate({
 
     setReady(false);
     setError("");
-    try {
-      const result = await hydrateAccountData();
-      if (!result.hasProfile) {
-        router.replace("/setup");
+    for (let attempt = 0; attempt <= HYDRATION_RETRY_DELAYS.length; attempt += 1) {
+      try {
+        const result = await hydrateAccountData();
+        if (!result.hasProfile) {
+          router.replace("/setup");
+          return;
+        }
+        setReady(true);
         return;
+      } catch (hydrationError) {
+        if (hydrationError instanceof AccountAuthenticationRequiredError) {
+          clearAccountCache();
+          router.replace("/auth");
+          return;
+        }
+
+        const retryDelay = HYDRATION_RETRY_DELAYS[attempt];
+        if (retryDelay) {
+          await new Promise((resolve) => window.setTimeout(resolve, retryDelay));
+          continue;
+        }
+
+        setError(
+          "We could not open your account just now. Your information is still safe."
+        );
       }
-      setReady(true);
-    } catch {
-      setError(
-        "Your private records could not be loaded. Check the database setup and try again."
-      );
     }
   }, [pathname, router]);
 
@@ -69,13 +94,27 @@ export default function AccountDataGate({
     return (
       <main className="data-gate-page">
         <div className="data-gate-card">
-          <Database size={24} />
-          <h1>We could not load your workspace</h1>
+          <CloudOff size={24} />
+          <h1>Let&apos;s try that again</h1>
           <p>{error}</p>
-          <button type="button" onClick={() => void hydrate()}>
-            <RefreshCw size={15} />
-            Try again
-          </button>
+          <div className="data-gate-actions">
+            <button type="button" onClick={() => void hydrate()}>
+              <RefreshCw size={15} />
+              Try again
+            </button>
+            <button
+              className="data-gate-secondary"
+              type="button"
+              disabled={signingOut}
+              onClick={() => {
+                setSigningOut(true);
+                void signOutCurrentDevice();
+              }}
+            >
+              <LogOut size={15} />
+              {signingOut ? "Signing out" : "Sign out"}
+            </button>
+          </div>
         </div>
       </main>
     );

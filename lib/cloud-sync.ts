@@ -373,6 +373,13 @@ export function syncWorkflowResult(
 
 type CloudRow = Record<string, unknown>;
 
+export class AccountAuthenticationRequiredError extends Error {
+  constructor() {
+    super("Authentication required");
+    this.name = "AccountAuthenticationRequiredError";
+  }
+}
+
 function messages(value: unknown): Message[] {
   return Array.isArray(value) ? (value as Message[]) : [];
 }
@@ -383,9 +390,16 @@ export async function hydrateAccountData(): Promise<{
   if (!isSupabaseConfigured()) return { hasProfile: false };
 
   const supabase = createClient();
-  const { data: claimsData } = await supabase.auth.getClaims();
+  const { data: sessionData, error: sessionError } =
+    await supabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  if (!sessionData.session) throw new AccountAuthenticationRequiredError();
+
+  const { data: claimsData, error: claimsError } =
+    await supabase.auth.getClaims();
+  if (claimsError) throw claimsError;
   const currentUserId = claimsData?.claims.sub;
-  if (!currentUserId) throw new Error("Authentication required");
+  if (!currentUserId) throw new AccountAuthenticationRequiredError();
 
   const [
     profileResult,
