@@ -1,13 +1,36 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { buildSystemPrompt } from "@/lib/prompts";
+import { createClient as createSupabaseClient } from "@/lib/supabase/server";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 export async function POST(req: Request) {
   try {
+    if (!isSupabaseConfigured()) {
+      return new Response("Account storage is not configured.", { status: 503 });
+    }
+
+    const supabase = await createSupabaseClient();
+    const { data: claimsData } = await supabase.auth.getClaims();
+    if (!claimsData?.claims.sub) {
+      return new Response("Authentication required.", { status: 401 });
+    }
+
     const { messages, context } = await req.json();
 
-    if (!Array.isArray(messages) || messages.length === 0) {
+    if (
+      !Array.isArray(messages) ||
+      messages.length === 0 ||
+      messages.length > 100 ||
+      messages.some(
+        (message) =>
+          !message ||
+          !["user", "assistant"].includes(message.role) ||
+          typeof message.content !== "string" ||
+          message.content.length > 12_000
+      )
+    ) {
       return new Response("A conversation is required.", { status: 400 });
     }
 
@@ -38,7 +61,10 @@ export async function POST(req: Request) {
     });
 
     return new Response(readable, {
-      headers: { "Content-Type": "text/plain; charset=utf-8" },
+      headers: {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "private, no-store",
+      },
     });
   } catch {
     return new Response(

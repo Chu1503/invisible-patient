@@ -1,3 +1,17 @@
+import {
+  syncActionPlan,
+  syncActiveCareRecipient,
+  syncCareEvent,
+  syncCareEventOutcome,
+  syncCareRecipient,
+  syncCareTask,
+  syncCareTaskCompletion,
+  syncCaregiverProfile,
+  syncFollowUp,
+  syncFollowUpCompletion,
+  syncWorkflowResult,
+} from "./cloud-sync";
+
 export type CareIssue =
   | "wandering"
   | "agitation"
@@ -28,10 +42,9 @@ export interface CareRecipient {
   condition: string;
   stage: string;
   livingSituation: string;
-  routines: string[];
   knownTriggers: string[];
   mobility: string;
-  approvedInstructions: string[];
+  careNotes: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -169,6 +182,7 @@ export function saveCaregiverProfile(
     updatedAt: now,
   };
   writeLocal(KEYS.caregiver, profile);
+  syncCaregiverProfile(profile);
   return profile;
 }
 
@@ -197,6 +211,10 @@ export function saveCareRecipient(
     ? recipients.map((item) => (item.id === recipient.id ? recipient : item))
     : [...recipients, recipient];
   writeLocal(KEYS.recipients, updated);
+  syncCareRecipient(
+    recipient,
+    getActiveCareRecipientId() === recipient.id
+  );
   if (!getActiveCareRecipientId()) setActiveCareRecipientId(recipient.id);
   return recipient;
 }
@@ -209,6 +227,7 @@ export function getActiveCareRecipientId(): string | null {
 export function setActiveCareRecipientId(id: string): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(KEYS.activeRecipient, id);
+  syncActiveCareRecipient(id);
 }
 
 export function getActiveCareRecipient(): CareRecipient | null {
@@ -230,6 +249,7 @@ export function saveCareEvent(event: CareEvent): void {
       ? events.map((item) => (item.id === event.id ? event : item))
       : [event, ...events]
   );
+  syncCareEvent(event);
 }
 
 export function updateCareEventOutcome(eventId: string, outcome: string): void {
@@ -239,6 +259,7 @@ export function updateCareEventOutcome(eventId: string, outcome: string): void {
       : event
   );
   writeLocal(KEYS.events, events);
+  syncCareEventOutcome(eventId, outcome);
 }
 
 export function getActionPlans(): ActionPlan[] {
@@ -249,6 +270,7 @@ export function saveActionPlan(plan: ActionPlan): void {
   const plans = getActionPlans();
   if (plans.some((item) => item.id === plan.id)) return;
   writeLocal(KEYS.plans, [plan, ...plans]);
+  syncActionPlan(plan);
 }
 
 export function getCareTasks(): CareTask[] {
@@ -264,15 +286,18 @@ export function saveCareTask(task: CareTask): void {
       ? tasks.map((item) => (item.id === task.id ? task : item))
       : [task, ...tasks]
   );
+  syncCareTask(task);
 }
 
 export function toggleCareTask(taskId: string): void {
+  const existing = getCareTasks().find((task) => task.id === taskId);
   writeLocal(
     KEYS.tasks,
     getCareTasks().map((task) =>
       task.id === taskId ? { ...task, completed: !task.completed } : task
     )
   );
+  if (existing) syncCareTaskCompletion(taskId, !existing.completed);
 }
 
 export function getFollowUps(): FollowUp[] {
@@ -287,6 +312,7 @@ export function saveFollowUp(followUp: FollowUp): void {
   const followUps = getFollowUps();
   if (followUps.some((item) => item.id === followUp.id)) return;
   writeLocal(KEYS.followUps, [followUp, ...followUps]);
+  syncFollowUp(followUp);
 }
 
 export function completeFollowUp(followUpId: string): void {
@@ -296,6 +322,7 @@ export function completeFollowUp(followUpId: string): void {
       followUp.id === followUpId ? { ...followUp, completed: true } : followUp
     )
   );
+  syncFollowUpCompletion(followUpId, true);
 }
 
 export function saveWorkflowResult(workflow: CareWorkflowResult): void {
@@ -317,6 +344,7 @@ export function saveWorkflowResult(workflow: CareWorkflowResult): void {
     saveFollowUp(workflow.followUp);
   }
   writeLocal(KEYS.latestWorkflow, workflow);
+  syncWorkflowResult(workflow, !hasMatchingOpenFollowUp);
 }
 
 export function getLatestWorkflow(): CareWorkflowResult | null {

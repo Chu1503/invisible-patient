@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Check,
   Clock3,
@@ -9,7 +9,9 @@ import {
   Pencil,
   Save,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
+import { clearAccountCache } from "@/lib/cloud-sync";
 import {
   completeFollowUp,
   getActiveCareRecipient,
@@ -22,9 +24,22 @@ import {
   type CaregiverProfile,
   type FollowUp,
 } from "@/lib/care";
+import {
+  CONDITION_OPTIONS,
+  LIVING_SITUATIONS,
+  getStagesForCondition,
+} from "@/lib/profile-options";
+import { createClient } from "@/lib/supabase/client";
 
-type ProfileDraft = Omit<CaregiverProfile, "id" | "createdAt" | "updatedAt">;
-type RecipientDraft = Omit<CareRecipient, "id" | "createdAt" | "updatedAt">;
+type ProfileDraft = Pick<CaregiverProfile, "displayName" | "zipCode">;
+type RecipientDraft = Pick<
+  CareRecipient,
+  | "clientCode"
+  | "condition"
+  | "stage"
+  | "livingSituation"
+  | "careNotes"
+>;
 
 const inputClass =
   "w-full rounded-xl border border-white/10 bg-[#0A111D] px-3 py-2.5 text-sm text-[#F5F0E8] outline-none placeholder:text-[#A09890]/50 focus:border-[#B2AC88]/40";
@@ -33,44 +48,37 @@ const labelClass =
 
 const emptyProfile: ProfileDraft = {
   displayName: "",
-  role: "Caregiver",
-  employer: "",
-  shift: "",
-  experience: "",
-  communicationPreference: "balanced",
   zipCode: "",
-  supportContact: "",
 };
 
 const emptyRecipient: RecipientDraft = {
   clientCode: "",
-  condition: "Alzheimer’s disease",
-  stage: "Mid stage",
-  livingSituation: "At home",
-  routines: [],
-  knownTriggers: [],
-  mobility: "Independent with supervision",
-  approvedInstructions: [],
+  condition: CONDITION_OPTIONS[0],
+  stage: getStagesForCondition(CONDITION_OPTIONS[0])[0],
+  livingSituation: LIVING_SITUATIONS[0],
+  careNotes: "",
 };
 
-function splitList(value: string): string[] {
-  return value
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
 export default function ProfilePage() {
+  const router = useRouter();
   const [mounted, setMounted] = useState(false);
   const [profile, setProfile] = useState<CaregiverProfile | null>(null);
-  const [activeRecipient, setActiveRecipient] = useState<CareRecipient | null>(null);
+  const [activeRecipient, setActiveRecipient] =
+    useState<CareRecipient | null>(null);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingRecipient, setEditingRecipient] = useState(false);
-  const [profileDraft, setProfileDraft] = useState<ProfileDraft>(emptyProfile);
+  const [profileDraft, setProfileDraft] =
+    useState<ProfileDraft>(emptyProfile);
   const [recipientDraft, setRecipientDraft] =
     useState<RecipientDraft>(emptyRecipient);
-  const [signOutNotice, setSignOutNotice] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [saveError, setSaveError] = useState("");
+
+  const stages = useMemo(
+    () => getStagesForCondition(recipientDraft.condition),
+    [recipientDraft.condition]
+  );
 
   function refresh() {
     const storedProfile = getCaregiverProfile();
@@ -84,29 +92,22 @@ export default function ProfilePage() {
       storedProfile
         ? {
             displayName: storedProfile.displayName,
-            role: storedProfile.role,
-            employer: storedProfile.employer,
-            shift: storedProfile.shift,
-            experience: storedProfile.experience,
-            communicationPreference: storedProfile.communicationPreference,
             zipCode: storedProfile.zipCode,
-            supportContact: storedProfile.supportContact,
           }
         : emptyProfile
     );
 
-    if (storedActive) {
-      setRecipientDraft({
-        clientCode: storedActive.clientCode,
-        condition: storedActive.condition,
-        stage: storedActive.stage,
-        livingSituation: storedActive.livingSituation,
-        routines: storedActive.routines,
-        knownTriggers: storedActive.knownTriggers,
-        mobility: storedActive.mobility,
-        approvedInstructions: storedActive.approvedInstructions,
-      });
-    }
+    setRecipientDraft(
+      storedActive
+        ? {
+            clientCode: storedActive.clientCode,
+            condition: storedActive.condition,
+            stage: storedActive.stage,
+            livingSituation: storedActive.livingSituation,
+            careNotes: storedActive.careNotes,
+          }
+        : emptyRecipient
+    );
   }
 
   useEffect(() => {
@@ -121,22 +122,73 @@ export default function ProfilePage() {
 
   function submitProfile(event: React.FormEvent) {
     event.preventDefault();
-    saveCaregiverProfile(profileDraft);
+    setSaveError("");
+    if (!/^[0-9]{5}(-[0-9]{4})?$/.test(profileDraft.zipCode.trim())) {
+      setSaveError("Enter a valid 5-digit ZIP code.");
+      return;
+    }
+
+    const existing = profile ?? {
+      id: "",
+      role: "Caregiver",
+      employer: "",
+      shift: "",
+      experience: "",
+      communicationPreference: "balanced" as const,
+      supportContact: "",
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
+    saveCaregiverProfile({
+      ...existing,
+      displayName: profileDraft.displayName.trim(),
+      zipCode: profileDraft.zipCode.trim(),
+    });
     setEditingProfile(false);
     refresh();
   }
 
   function submitRecipient(event: React.FormEvent) {
     event.preventDefault();
+    setSaveError("");
+
+    const existing = activeRecipient ?? {
+      id: "",
+      mobility: "",
+      knownTriggers: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+
     const saved = saveCareRecipient({
       ...(activeRecipient
         ? { id: activeRecipient.id, createdAt: activeRecipient.createdAt }
         : {}),
-      ...recipientDraft,
+      clientCode: recipientDraft.clientCode.trim(),
+      condition: recipientDraft.condition,
+      stage: recipientDraft.stage,
+      livingSituation: recipientDraft.livingSituation,
+      mobility: existing.mobility,
+      knownTriggers: existing.knownTriggers,
+      careNotes: recipientDraft.careNotes.trim(),
     });
     setActiveCareRecipientId(saved.id);
     setEditingRecipient(false);
     refresh();
+  }
+
+  async function signOut() {
+    setSigningOut(true);
+    const { error } = await createClient().auth.signOut();
+    if (error) {
+      setSaveError("We could not sign you out. Please try again.");
+      setSigningOut(false);
+      return;
+    }
+    clearAccountCache();
+    router.replace("/auth");
+    router.refresh();
   }
 
   if (!mounted) {
@@ -151,7 +203,9 @@ export default function ProfilePage() {
   const profileName =
     profile?.displayName || profileDraft.displayName || "Your profile";
   const profileInitial =
-    profileName === "Your profile" ? "?" : profileName.trim().charAt(0).toUpperCase();
+    profileName === "Your profile"
+      ? "?"
+      : profileName.trim().charAt(0).toUpperCase();
   const clientInitial =
     activeRecipient?.clientCode.trim().charAt(0).toUpperCase() || "C";
 
@@ -160,24 +214,23 @@ export default function ProfilePage() {
       <Navbar />
       <div className="mx-auto max-w-4xl">
         <header className="mb-8 flex items-end justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-semibold tracking-tight text-[#F5F0E8]">
-              Profile
-            </h1>
-          </div>
+          <h1 className="text-4xl font-semibold tracking-tight text-[#F5F0E8]">
+            Profile
+          </h1>
           <button
             type="button"
-            onClick={() => setSignOutNotice(true)}
-            className="ip-secondary-button min-h-10 px-4"
+            onClick={() => void signOut()}
+            disabled={signingOut}
+            className="ip-secondary-button min-h-10 px-4 disabled:opacity-50"
           >
             <LogOut size={14} />
-            Sign Out
+            {signingOut ? "Signing out..." : "Sign out"}
           </button>
         </header>
 
-        {signOutNotice && (
-          <p className="mb-4 rounded-xl border border-[#B2AC88]/15 bg-[#B2AC88]/5 px-4 py-3 text-xs text-[#D4CEBD]">
-            Sign out will be available when accounts are added.
+        {saveError && (
+          <p className="mb-4 rounded-xl border border-[#8B5A5A]/30 bg-[#8B5A5A]/10 px-4 py-3 text-xs text-[#D4CEBD]">
+            {saveError}
           </p>
         )}
 
@@ -191,7 +244,9 @@ export default function ProfilePage() {
                 <h2>{profileName}</h2>
                 <p>
                   <MapPin size={14} />
-                  {profile?.zipCode || profileDraft.zipCode || "ZIP code not provided"}
+                  {profile?.zipCode ||
+                    profileDraft.zipCode ||
+                    "ZIP code not provided"}
                 </p>
               </div>
               {profile && !editingProfile && (
@@ -212,43 +267,34 @@ export default function ProfilePage() {
                 onSubmit={submitProfile}
                 className="profile-edit-form grid gap-3 sm:grid-cols-2"
               >
-                <label>
-                  <span className={labelClass}>Name</span>
-                  <input
-                    required
-                    className={inputClass}
-                    value={profileDraft.displayName}
-                    onChange={(event) =>
-                      setProfileDraft({
-                        ...profileDraft,
-                        displayName: event.target.value,
-                      })
-                    }
-                    placeholder="Alex"
-                  />
-                </label>
-                <label>
-                  <span className={labelClass}>ZIP code</span>
-                  <input
-                    className={inputClass}
-                    inputMode="numeric"
-                    maxLength={5}
-                    value={profileDraft.zipCode}
-                    onChange={(event) =>
-                      setProfileDraft({
-                        ...profileDraft,
-                        zipCode: event.target.value,
-                      })
-                    }
-                    placeholder="60601"
-                  />
-                </label>
+                <Field
+                  label="Name"
+                  required
+                  value={profileDraft.displayName}
+                  onChange={(value) =>
+                    setProfileDraft({ ...profileDraft, displayName: value })
+                  }
+                  placeholder="Alex"
+                />
+                <Field
+                  label="ZIP code"
+                  required
+                  inputMode="numeric"
+                  value={profileDraft.zipCode}
+                  onChange={(value) =>
+                    setProfileDraft({
+                      ...profileDraft,
+                      zipCode: value.replace(/[^0-9-]/g, ""),
+                    })
+                  }
+                  placeholder="60601"
+                />
                 <button
                   type="submit"
                   className="profile-save-button sm:col-span-2"
                 >
                   <Save size={14} />
-                  Save Profile
+                  Save profile
                 </button>
               </form>
             )}
@@ -286,19 +332,18 @@ export default function ProfilePage() {
                   <select
                     className={inputClass}
                     value={recipientDraft.condition}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const condition = event.target.value;
                       setRecipientDraft({
                         ...recipientDraft,
-                        condition: event.target.value,
-                      })
-                    }
+                        condition,
+                        stage: getStagesForCondition(condition)[0],
+                      });
+                    }}
                   >
-                    <option>Alzheimer’s disease</option>
-                    <option>Vascular dementia</option>
-                    <option>Lewy body dementia</option>
-                    <option>Frontotemporal dementia</option>
-                    <option>Parkinson’s disease dementia</option>
-                    <option>Other dementia</option>
+                    {CONDITION_OPTIONS.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
                   </select>
                 </label>
                 <label>
@@ -313,10 +358,9 @@ export default function ProfilePage() {
                       })
                     }
                   >
-                    <option>Early stage</option>
-                    <option>Mid stage</option>
-                    <option>Late stage</option>
-                    <option>Not documented</option>
+                    {stages.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
                   </select>
                 </label>
                 <label>
@@ -331,59 +375,32 @@ export default function ProfilePage() {
                       })
                     }
                   >
-                    <option>At home</option>
-                    <option>Shared home</option>
-                    <option>Assisted living</option>
-                    <option>Memory care</option>
-                    <option>Skilled nursing</option>
+                    {LIVING_SITUATIONS.map((option) => (
+                      <option key={option}>{option}</option>
+                    ))}
                   </select>
                 </label>
-                <Field
-                  label="Mobility"
-                  value={recipientDraft.mobility}
-                  onChange={(value) =>
-                    setRecipientDraft({ ...recipientDraft, mobility: value })
-                  }
-                />
-                <Field
-                  label="Routines"
-                  value={recipientDraft.routines.join(", ")}
-                  onChange={(value) =>
-                    setRecipientDraft({
-                      ...recipientDraft,
-                      routines: splitList(value),
-                    })
-                  }
-                  placeholder="Dinner at 6, evening walk"
-                />
-                <Field
-                  label="Known triggers"
-                  value={recipientDraft.knownTriggers.join(", ")}
-                  onChange={(value) =>
-                    setRecipientDraft({
-                      ...recipientDraft,
-                      knownTriggers: splitList(value),
-                    })
-                  }
-                  placeholder="Evening noise, unfamiliar staff"
-                />
-                <Field
-                  label="Approved instructions"
-                  value={recipientDraft.approvedInstructions.join(", ")}
-                  onChange={(value) =>
-                    setRecipientDraft({
-                      ...recipientDraft,
-                      approvedInstructions: splitList(value),
-                    })
-                  }
-                  placeholder="Follow the approved wandering protocol"
-                />
+                <label className="sm:col-span-2">
+                  <span className={labelClass}>Care notes</span>
+                  <textarea
+                    className={`${inputClass} min-h-28 resize-y`}
+                    value={recipientDraft.careNotes}
+                    onChange={(event) =>
+                      setRecipientDraft({
+                        ...recipientDraft,
+                        careNotes: event.target.value,
+                      })
+                    }
+                    placeholder="Anything useful to remember, such as mobility needs, known triggers, communication preferences, or other care context."
+                    maxLength={5000}
+                  />
+                </label>
                 <button
                   type="submit"
                   className="profile-save-button sm:col-span-2"
                 >
                   <Save size={14} />
-                  Save Client Profile
+                  Save client profile
                 </button>
               </form>
             ) : activeRecipient ? (
@@ -401,24 +418,10 @@ export default function ProfilePage() {
                   </div>
                 </div>
 
-                <div className="profile-info-grid">
-                  <Info label="Mobility" value={activeRecipient.mobility} />
+                <div className="profile-info-grid profile-info-grid-simple">
                   <Info
-                    label="Routines"
-                    value={activeRecipient.routines.join(", ") || "None recorded"}
-                  />
-                  <Info
-                    label="Known triggers"
-                    value={
-                      activeRecipient.knownTriggers.join(", ") || "None recorded"
-                    }
-                  />
-                  <Info
-                    label="Approved instructions"
-                    value={
-                      activeRecipient.approvedInstructions.join(", ") ||
-                      "None recorded"
-                    }
+                    label="Care notes"
+                    value={activeRecipient.careNotes || "Nothing added yet"}
                   />
                 </div>
               </div>
@@ -480,7 +483,7 @@ function Info({ label, value }: { label: string; value?: string }) {
   return (
     <div className="profile-info-item">
       <p>{label}</p>
-      <span>{value || "Not provided"}</span>
+      <span className="whitespace-pre-line">{value || "Not provided"}</span>
     </div>
   );
 }
@@ -491,12 +494,14 @@ function Field({
   onChange,
   placeholder,
   required,
+  inputMode,
 }: {
   label: string;
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
   required?: boolean;
+  inputMode?: React.HTMLAttributes<HTMLInputElement>["inputMode"];
 }) {
   return (
     <label>
@@ -507,6 +512,7 @@ function Field({
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}
+        inputMode={inputMode}
       />
     </label>
   );

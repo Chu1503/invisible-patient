@@ -38,9 +38,10 @@ export function buildSystemPrompt(context?: {
     clientCode?: string;
     condition?: string;
     stage?: string;
-    routines?: string[];
+    livingSituation?: string;
+    mobility?: string;
     knownTriggers?: string[];
-    approvedInstructions?: string[];
+    careNotes?: string;
   } | null;
   workflow?: {
     issue?: string;
@@ -114,9 +115,10 @@ Caregiver context:
 Selected care recipient:
 - Anonymous ID: ${context?.recipient?.clientCode || "not selected"}
 - Condition and stage: ${context?.recipient?.condition || "not provided"}, ${context?.recipient?.stage || "stage not provided"}
-- Routines: ${context?.recipient?.routines?.join(", ") || "none recorded"}
+- Living situation: ${context?.recipient?.livingSituation || "not provided"}
+- Mobility: ${context?.recipient?.mobility || "none recorded"}
 - Known triggers: ${context?.recipient?.knownTriggers?.join(", ") || "none recorded"}
-- Approved instructions: ${context?.recipient?.approvedInstructions?.join(", ") || "none recorded"}
+- Care notes: ${context?.recipient?.careNotes || "none recorded"}
 
 Care workflow already prepared:
 - Issue: ${context?.workflow?.issue || "general"}

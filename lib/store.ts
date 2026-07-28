@@ -1,3 +1,5 @@
+import { syncCheckin, syncLastMentalState } from "./cloud-sync";
+
 export type MentalState = "calm" | "restless" | "anxious" | "hopeful" | "tired" | "overwhelmed";
 export type RiskLevel = "low" | "moderate" | "high" | "crisis";
 
@@ -79,6 +81,7 @@ export function saveCheckin(entry: CheckinEntry): void {
   if (idx >= 0) checkins[idx] = entry;
   else checkins.push(entry);
   localStorage.setItem(KEYS.checkins, JSON.stringify(checkins));
+  syncCheckin(entry);
 }
 
 export function getLatestCheckin(): CheckinEntry | null {
@@ -95,6 +98,7 @@ export function getLastMentalState(): MentalState {
 export function saveLastMentalState(state: MentalState): void {
   if (typeof window === "undefined") return;
   localStorage.setItem(KEYS.lastState, state);
+  syncLastMentalState(state);
 }
 
 export function getLast7DaysCheckins(): CheckinEntry[] {
