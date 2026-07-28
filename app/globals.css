@@ -727,7 +727,6 @@ select:focus-visible {
 
 .profile-identity-card,
 .profile-client-card,
-.profile-care-card,
 .profile-tasks-card,
 .profile-followups-card {
   border: 1px solid rgba(249, 250, 247, 0.12);
@@ -771,7 +770,7 @@ select:focus-visible {
   object-fit: contain;
 }
 
-.profile-identity-main h3 {
+.profile-identity-main h2 {
   overflow: hidden;
   color: var(--ip-paper);
   font-size: 28px;
@@ -819,7 +818,6 @@ select:focus-visible {
 
 .profile-identity-card label > span,
 .profile-client-card label > span,
-.profile-care-card label > span,
 .profile-tasks-card label > span,
 .profile-followups-card label > span {
   color: var(--ip-muted-on-dark) !important;
@@ -845,7 +843,6 @@ select:focus-visible {
 }
 
 .profile-client-card,
-.profile-care-card,
 .profile-tasks-card,
 .profile-followups-card {
   padding: 26px;
@@ -2974,7 +2971,6 @@ select:focus-visible {
 
   .profile-identity-card,
   .profile-client-card,
-  .profile-care-card,
   .profile-tasks-card,
   .profile-followups-card {
     border-radius: 22px;
@@ -2992,7 +2988,7 @@ select:focus-visible {
     font-size: 24px;
   }
 
-  .profile-identity-main h3 {
+  .profile-identity-main h2 {
     font-size: 23px;
   }
 
