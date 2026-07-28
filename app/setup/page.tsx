@@ -1,9 +1,10 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, ShieldCheck } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { ArrowLeft, ArrowRight, Check } from "lucide-react";
 import { careId } from "@/lib/care";
+import { hydrateAccountData } from "@/lib/cloud-sync";
+import { isValidZipCode } from "@/lib/form-validation";
 import {
   CONDITION_OPTIONS,
   LIVING_SITUATIONS,
@@ -16,7 +17,6 @@ import { createClient } from "@/lib/supabase/client";
 const TOTAL_STEPS = 5;
 
 export default function SetupPage() {
-  const router = useRouter();
   const [step, setStep] = useState(0);
   const [displayName, setDisplayName] = useState("");
   const [zipCode, setZipCode] = useState("");
@@ -34,10 +34,11 @@ export default function SetupPage() {
   const [error, setError] = useState("");
 
   const stages = useMemo(() => getStagesForCondition(condition), [condition]);
+  const zipCodeValid = isValidZipCode(zipCode);
 
   const stepValid = [
     displayName.trim().length > 0,
-    /^[0-9]{5}(-[0-9]{4})?$/.test(zipCode.trim()),
+    zipCodeValid,
     clientCode.trim().length > 0,
     Boolean(condition && stage),
     Boolean(livingSituation),
@@ -77,18 +78,18 @@ export default function SetupPage() {
       return;
     }
 
-    const { error: metadataError } = await supabase.auth.updateUser({
-      data: { onboarding_complete: true },
-    });
-
-    setSaving(false);
-    if (metadataError) {
-      setError("Your details were saved, but the account setup could not finish.");
+    try {
+      const result = await hydrateAccountData();
+      if (!result.hasProfile) throw new Error("Profile was not available");
+    } catch {
+      setSaving(false);
+      setError(
+        "Your details were saved, but your workspace could not be loaded. Please try again."
+      );
       return;
     }
 
-    router.replace("/");
-    router.refresh();
+    window.location.replace("/");
   }
 
   return (
@@ -116,9 +117,13 @@ export default function SetupPage() {
 
         <form onSubmit={goNext} className="setup-card">
           <div className="setup-copy">
-            <p>{STEP_CONTENT[step].eyebrow}</p>
+            {STEP_CONTENT[step].eyebrow && (
+              <p>{STEP_CONTENT[step].eyebrow}</p>
+            )}
             <h1>{STEP_CONTENT[step].title}</h1>
-            <span>{STEP_CONTENT[step].description}</span>
+            {STEP_CONTENT[step].description && (
+              <span>{STEP_CONTENT[step].description}</span>
+            )}
           </div>
 
           <div className="setup-fields">
@@ -131,7 +136,6 @@ export default function SetupPage() {
                   maxLength={100}
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
-                  placeholder="Alex"
                 />
               </SetupField>
             )}
@@ -149,8 +153,13 @@ export default function SetupPage() {
                   onChange={(event) =>
                     setZipCode(event.target.value.replace(/[^0-9-]/g, ""))
                   }
-                  placeholder="60601"
+                  aria-invalid={zipCode.length > 0 && !zipCodeValid}
                 />
+                {zipCode.length > 0 && !zipCodeValid && (
+                  <small className="setup-field-error">
+                    Enter a valid 5-digit ZIP code.
+                  </small>
+                )}
               </SetupField>
             )}
 
@@ -162,7 +171,6 @@ export default function SetupPage() {
                   maxLength={120}
                   value={clientCode}
                   onChange={(event) => setClientCode(event.target.value)}
-                  placeholder="Mr. K or Client 01"
                 />
               </SetupField>
             )}
@@ -241,10 +249,7 @@ export default function SetupPage() {
                 Back
               </button>
             ) : (
-              <div className="setup-security">
-                <ShieldCheck size={15} />
-                Private to your account
-              </div>
+              <span aria-hidden="true" />
             )}
 
             <button
@@ -293,26 +298,24 @@ function SetupField({
 
 const STEP_CONTENT = [
   {
-    eyebrow: "Let’s start with you",
-    title: "What should we call you?",
-    description: "This is how the companion will address you.",
+    eyebrow: "",
+    title: "Let’s start with you",
+    description: "",
   },
   {
-    eyebrow: "Your local area",
-    title: "What is your ZIP code?",
-    description:
-      "We use this only to make support and resource suggestions more relevant.",
+    eyebrow: "",
+    title: "Your ZIP code",
+    description: "",
   },
   {
-    eyebrow: "Care recipient",
+    eyebrow: "",
     title: "Who are you caring for?",
-    description:
-      "Use a first name, initials, or an internal client ID. Avoid a full legal name.",
+    description: "",
   },
   {
-    eyebrow: "Care context",
+    eyebrow: "",
     title: "What condition are they living with?",
-    description: "The stage options adjust to the condition you select.",
+    description: "",
   },
   {
     eyebrow: "A little more context",

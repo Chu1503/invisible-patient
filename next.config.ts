@@ -36,9 +36,17 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["[::1]"],
   poweredByHeader: false,
   async headers() {
     return [
+      {
+        source: "/task-reminder-sw.js",
+        headers: [
+          { key: "Cache-Control", value: "no-cache" },
+          { key: "Service-Worker-Allowed", value: "/" },
+        ],
+      },
       {
         source: "/(.*)",
         headers: securityHeaders,

@@ -19,10 +19,14 @@ Do not copy the secret or service-role key into this project or Vercel.
 2. Copy the complete contents of
    `supabase/migrations/202607270001_initial_account_data.sql`.
 3. Run it once.
+4. Then copy and run
+   `supabase/migrations/202607280001_care_task_reminders.sql`.
 
 The migration creates account-owned tables for profiles, care recipients,
 check-ins and chat messages, care events, action plans, tasks, and follow-ups.
 Every table has RLS policies that compare `auth.uid()` with the row owner.
+The second migration adds recurring care-task schedules, reminder timing, and
+completion timestamps. It is safe to run once after the initial migration.
 
 ## 3. Configure authentication
 
@@ -40,7 +44,15 @@ In **Authentication → Providers → Email**:
 - Keep email confirmation enabled for production.
 
 Before a public launch, configure a branded SMTP provider. Supabase's shared
-development email service is not intended for production delivery.
+development email service is limited to a very small number of messages and is
+not intended for production delivery. A free Resend account works for early
+testing after you verify a sending domain:
+
+- Host: `smtp.resend.com`
+- Port: `465`
+- Username: `resend`
+- Password: your Resend API key
+- Sender: an address on your verified sending domain
 
 ## 4. Add local environment variables
 
@@ -72,6 +84,9 @@ than a broad wildcard when possible.
 7. Start a Talk session, sign out, then sign back in and confirm its metrics are
    present in Insights. Chat messages are stored, but no previous-chat UI is
    exposed yet.
+8. Add a one-time and a recurring care task, mark each complete, reload, and
+   confirm the one-time task stays completed while the recurring task advances
+   to its next due date.
 
 ## Security boundary
 

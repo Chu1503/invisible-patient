@@ -2,6 +2,10 @@
 
 import { useState } from "react";
 import { ArrowRight, LockKeyhole, Mail } from "lucide-react";
+import {
+  getPasswordError,
+  isValidEmailAddress,
+} from "@/lib/form-validation";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
 
@@ -10,11 +14,9 @@ type AuthMode = "sign-in" | "sign-up" | "reset";
 export default function AuthForm({
   initialError = "",
   configurationMissing = false,
-  nextPath = "/",
 }: {
   initialError?: string;
   configurationMissing?: boolean;
-  nextPath?: string;
 }) {
   const [mode, setMode] = useState<AuthMode>("sign-in");
   const [email, setEmail] = useState("");
@@ -29,15 +31,17 @@ export default function AuthForm({
     event.preventDefault();
     if (unavailable) return;
 
+    if (!isValidEmailAddress(email)) {
+      setIsError(true);
+      setMessage("Enter a valid email address, such as name@example.com.");
+      return;
+    }
+
     setLoading(true);
     setMessage("");
     setIsError(false);
 
     const supabase = createClient();
-    const redirectTarget = `${window.location.origin}/auth/callback?next=${encodeURIComponent(
-      mode === "sign-up" ? "/setup" : nextPath
-    )}`;
-
     if (mode === "reset") {
       const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
         redirectTo: `${window.location.origin}/auth/callback?next=/auth/update-password`,
@@ -53,17 +57,20 @@ export default function AuthForm({
     }
 
     if (mode === "sign-up") {
-      if (password.length < 10) {
+      const passwordError = getPasswordError(password);
+      if (passwordError) {
         setLoading(false);
         setIsError(true);
-        setMessage("Use at least 10 characters for your password.");
+        setMessage(passwordError);
         return;
       }
 
       const { data, error } = await supabase.auth.signUp({
         email: email.trim(),
         password,
-        options: { emailRedirectTo: redirectTarget },
+        options: {
+          emailRedirectTo: `${window.location.origin}/auth/callback?next=/setup`,
+        },
       });
       setLoading(false);
 
@@ -96,7 +103,7 @@ export default function AuthForm({
       return;
     }
 
-    window.location.assign(nextPath);
+    window.location.assign("/");
   }
 
   return (
@@ -107,7 +114,6 @@ export default function AuthForm({
       </div>
 
       <div className="auth-heading">
-        <p>Private caregiver support</p>
         <h1>
           {mode === "sign-up"
             ? "Create your account"
@@ -115,13 +121,6 @@ export default function AuthForm({
               ? "Reset your password"
               : "Welcome back"}
         </h1>
-        <span>
-          {mode === "sign-up"
-            ? "Your care information stays connected to your account."
-            : mode === "reset"
-              ? "We will email you a secure reset link."
-              : "Continue to your private caregiver workspace."}
-        </span>
       </div>
 
       {unavailable && (
@@ -148,7 +147,6 @@ export default function AuthForm({
               required
               value={email}
               onChange={(event) => setEmail(event.target.value)}
-              placeholder="you@example.com"
               disabled={unavailable || loading}
             />
           </div>
@@ -165,12 +163,8 @@ export default function AuthForm({
                   mode === "sign-up" ? "new-password" : "current-password"
                 }
                 required
-                minLength={mode === "sign-up" ? 10 : undefined}
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder={
-                  mode === "sign-up" ? "At least 10 characters" : "Your password"
-                }
                 disabled={unavailable || loading}
               />
             </div>
@@ -194,10 +188,16 @@ export default function AuthForm({
       </form>
 
       <div className="auth-actions">
-        {mode === "sign-in" && (
+        {mode === "sign-in" ? (
           <button type="button" onClick={() => setMode("reset")}>
             Forgot password?
           </button>
+        ) : mode === "reset" ? (
+          <button type="button" onClick={() => setMode("sign-in")}>
+            Back to sign in
+          </button>
+        ) : (
+          <span aria-hidden="true" />
         )}
         <button
           type="button"
@@ -207,16 +207,9 @@ export default function AuthForm({
             setIsError(false);
           }}
         >
-          {mode === "sign-up"
-            ? "Already have an account? Sign in"
-            : "New here? Create an account"}
+          {mode === "sign-up" ? "Sign in" : "Create an account"}
         </button>
       </div>
-
-      <p className="auth-privacy">
-        Account sessions use secure cookies. Your private records are isolated
-        from every other account at the database level.
-      </p>
     </div>
   );
 }

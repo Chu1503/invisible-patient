@@ -55,33 +55,11 @@ export async function updateSession(request: NextRequest) {
   if (!claims && !isPublicPath(pathname)) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth";
-    url.searchParams.set("next", pathname);
+    url.search = "";
     return NextResponse.redirect(url);
   }
-
-  const onboardingComplete =
-    claims?.user_metadata?.onboarding_complete === true;
 
   if (claims && pathname === "/auth") {
-    const url = request.nextUrl.clone();
-    url.pathname = onboardingComplete ? "/" : "/setup";
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
-
-  if (
-    claims &&
-    !onboardingComplete &&
-    pathname !== "/setup" &&
-    !isPublicPath(pathname)
-  ) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/setup";
-    url.search = "";
-    return NextResponse.redirect(url);
-  }
-
-  if (claims && onboardingComplete && pathname === "/setup") {
     const url = request.nextUrl.clone();
     url.pathname = "/";
     url.search = "";

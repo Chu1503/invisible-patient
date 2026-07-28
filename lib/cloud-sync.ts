@@ -224,13 +224,27 @@ export function syncCareTask(task: CareTask): void {
           recipient_id: task.recipientId,
           event_id: task.eventId ?? null,
           title: task.title,
+          details: task.details ?? "",
           owner_name: task.owner,
           due_at: iso(task.dueAt),
+          recurrence: task.recurrence ?? "none",
+          reminder_minutes: task.reminderMinutes ?? null,
+          last_completed_at: iso(task.lastCompletedAt),
           completed: task.completed,
           created_at: iso(task.createdAt),
         },
         { onConflict: "user_id,id" }
       )
+  );
+}
+
+export function deleteCareTaskFromCloud(taskId: string): void {
+  void safelyWrite((currentUserId) =>
+    createClient()
+      .from("care_tasks")
+      .delete()
+      .eq("user_id", currentUserId)
+      .eq("id", taskId)
   );
 }
 
@@ -515,8 +529,18 @@ export async function hydrateAccountData(): Promise<{
       recipientId: String(row.recipient_id),
       eventId: row.event_id ? String(row.event_id) : undefined,
       title: String(row.title ?? ""),
+      details: String(row.details ?? ""),
       owner: String(row.owner_name ?? "Caregiver"),
       dueAt: row.due_at ? timestamp(row.due_at) : undefined,
+      recurrence:
+        (row.recurrence as CareTask["recurrence"]) ?? "none",
+      reminderMinutes:
+        typeof row.reminder_minutes === "number"
+          ? row.reminder_minutes
+          : null,
+      lastCompletedAt: row.last_completed_at
+        ? timestamp(row.last_completed_at)
+        : undefined,
       completed: row.completed === true,
       createdAt: timestamp(row.created_at),
     })

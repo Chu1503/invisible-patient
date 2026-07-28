@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { ArrowRight, LockKeyhole } from "lucide-react";
+import { getPasswordError } from "@/lib/form-validation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function UpdatePasswordPage() {
@@ -14,8 +15,9 @@ export default function UpdatePasswordPage() {
     event.preventDefault();
     setMessage("");
 
-    if (password.length < 10) {
-      setMessage("Use at least 10 characters for your new password.");
+    const passwordError = getPasswordError(password);
+    if (passwordError) {
+      setMessage(passwordError);
       return;
     }
     if (password !== confirmPassword) {
@@ -43,9 +45,7 @@ export default function UpdatePasswordPage() {
           <span>The Invisible Patient</span>
         </div>
         <div className="auth-heading">
-          <p>Account security</p>
           <h1>Choose a new password</h1>
-          <span>Use a password you do not use on another service.</span>
         </div>
         {message && <div className="auth-notice is-error">{message}</div>}
         <form onSubmit={submit} className="auth-form">
@@ -56,11 +56,9 @@ export default function UpdatePasswordPage() {
               <input
                 type="password"
                 autoComplete="new-password"
-                minLength={10}
                 required
                 value={password}
                 onChange={(event) => setPassword(event.target.value)}
-                placeholder="At least 10 characters"
               />
             </div>
           </label>
@@ -71,11 +69,9 @@ export default function UpdatePasswordPage() {
               <input
                 type="password"
                 autoComplete="new-password"
-                minLength={10}
                 required
                 value={confirmPassword}
                 onChange={(event) => setConfirmPassword(event.target.value)}
-                placeholder="Repeat your password"
               />
             </div>
           </label>

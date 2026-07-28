@@ -1,11 +1,11 @@
 import {
+  deleteCareTaskFromCloud,
   syncActionPlan,
   syncActiveCareRecipient,
   syncCareEvent,
   syncCareEventOutcome,
   syncCareRecipient,
   syncCareTask,
-  syncCareTaskCompletion,
   syncCaregiverProfile,
   syncFollowUp,
   syncFollowUpCompletion,
@@ -77,8 +77,12 @@ export interface CareTask {
   recipientId: string;
   eventId?: string;
   title: string;
+  details?: string;
   owner: string;
   dueAt?: number;
+  recurrence?: "none" | "daily" | "weekly";
+  reminderMinutes?: number | null;
+  lastCompletedAt?: number;
   completed: boolean;
   createdAt: number;
 }
@@ -107,7 +111,14 @@ export interface CareResource {
   id: string;
   title: string;
   description: string;
-  category: "local-care" | "caregiver-support" | "crisis" | "training";
+  category:
+    | "local-care"
+    | "daily-needs"
+    | "respite"
+    | "caregiver-support"
+    | "care-provider"
+    | "crisis"
+    | "training";
   locationLabel: string;
   url: string;
   phone?: string;
@@ -277,27 +288,83 @@ export function getCareTasks(): CareTask[] {
   return readLocal<CareTask[]>(KEYS.tasks, []);
 }
 
+function notifyCareTaskChange(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("ip-care-tasks-changed"));
+}
+
 export function saveCareTask(task: CareTask): void {
   const tasks = getCareTasks();
   const existing = tasks.some((item) => item.id === task.id);
+  const normalized: CareTask = {
+    ...task,
+    details: task.details ?? "",
+    recurrence: task.recurrence ?? "none",
+    reminderMinutes: task.reminderMinutes ?? null,
+  };
   writeLocal(
     KEYS.tasks,
     existing
-      ? tasks.map((item) => (item.id === task.id ? task : item))
-      : [task, ...tasks]
+      ? tasks.map((item) => (item.id === task.id ? normalized : item))
+      : [normalized, ...tasks]
   );
-  syncCareTask(task);
+  syncCareTask(normalized);
+  notifyCareTaskChange();
+}
+
+function nextRecurringDue(
+  dueAt: number,
+  recurrence: "daily" | "weekly"
+): number {
+  const next = new Date(dueAt);
+  const daysToAdd = recurrence === "daily" ? 1 : 7;
+
+  do {
+    next.setDate(next.getDate() + daysToAdd);
+  } while (next.getTime() <= Date.now());
+
+  return next.getTime();
+}
+
+export function completeCareTask(taskId: string): CareTask | null {
+  const task = getCareTasks().find((item) => item.id === taskId);
+  if (!task) return null;
+
+  const recurrence = task.recurrence ?? "none";
+  const now = Date.now();
+  const updated: CareTask =
+    recurrence !== "none" && task.dueAt
+      ? {
+          ...task,
+          completed: false,
+          dueAt: nextRecurringDue(task.dueAt, recurrence),
+          lastCompletedAt: now,
+        }
+      : { ...task, completed: true, lastCompletedAt: now };
+
+  saveCareTask(updated);
+  return updated;
 }
 
 export function toggleCareTask(taskId: string): void {
-  const existing = getCareTasks().find((task) => task.id === taskId);
+  const task = getCareTasks().find((item) => item.id === taskId);
+  if (!task) return;
+
+  if (!task.completed) {
+    completeCareTask(taskId);
+    return;
+  }
+
+  saveCareTask({ ...task, completed: false, lastCompletedAt: undefined });
+}
+
+export function deleteCareTask(taskId: string): void {
   writeLocal(
     KEYS.tasks,
-    getCareTasks().map((task) =>
-      task.id === taskId ? { ...task, completed: !task.completed } : task
-    )
+    getCareTasks().filter((task) => task.id !== taskId)
   );
-  if (existing) syncCareTaskCompletion(taskId, !existing.completed);
+  deleteCareTaskFromCloud(taskId);
+  notifyCareTaskChange();
 }
 
 export function getFollowUps(): FollowUp[] {
@@ -407,25 +474,71 @@ export function getCareResources(zipCode = ""): CareResource[] {
   return [
     {
       id: "resource_eldercare",
-      title: "Eldercare Locator",
-      description: "Find local aging, transportation, training, and support services.",
-      category: "local-care",
+      title: "Local caregiver support",
+      description:
+        "Find local counseling, support groups, caregiver training, respite, and help accessing services.",
+      category: "caregiver-support",
       locationLabel: location,
       url: "https://eldercare.acl.gov/home",
       phone: "800-677-1116",
       verifiedBy: "Administration for Community Living",
-      reviewedAt: "March 2, 2026",
+      reviewedAt: "July 27, 2026",
+    },
+    {
+      id: "resource_211",
+      title: "211 local help",
+      description:
+        "Find nearby help with food, utilities, housing, transportation, healthcare, and caregiver needs.",
+      category: "daily-needs",
+      locationLabel: location,
+      url: "https://211.org/about-us/your-local-211",
+      phone: "211",
+      verifiedBy: "United Way 211",
+      reviewedAt: "July 27, 2026",
+    },
+    {
+      id: "resource_respite",
+      title: "National Respite Locator",
+      description:
+        "Search for respite services that can provide a short break from day-to-day caregiving.",
+      category: "respite",
+      locationLabel: location,
+      url: "https://archrespite.org/respitelocator/",
+      verifiedBy: "ARCH National Respite Network",
+      reviewedAt: "July 27, 2026",
+    },
+    {
+      id: "resource_state_support",
+      title: "Caregiver services by state",
+      description:
+        "Browse state-specific caregiver programs, benefits guidance, legal help, and support.",
+      category: "caregiver-support",
+      locationLabel: "All U.S. states",
+      url: "https://www.caregiver.org/connecting-caregivers/services-by-state/",
+      verifiedBy: "Family Caregiver Alliance",
+      reviewedAt: "July 27, 2026",
+    },
+    {
+      id: "resource_care_compare",
+      title: "Medicare Care Compare",
+      description:
+        "Compare Medicare-certified home health, hospice, nursing, and other care providers near you.",
+      category: "care-provider",
+      locationLabel: location,
+      url: "https://www.medicare.gov/care-compare/",
+      verifiedBy: "Medicare",
+      reviewedAt: "July 27, 2026",
     },
     {
       id: "resource_alz",
-      title: "Alzheimer’s Association 24/7 Helpline",
-      description: "Care consultation, local programs, and dementia information.",
+      title: "Dementia caregiver support",
+      description:
+        "Find local caregiver support groups, education, and dementia-specific guidance.",
       category: "caregiver-support",
       locationLabel: location,
-      url: "https://www.alz.org/help-support/resources/helpline",
-      phone: "800-272-3900",
-      verifiedBy: "National Institute on Aging resource listing",
-      reviewedAt: "July 2026",
+      url: "https://www.alz.org/help-support/community",
+      verifiedBy: "Alzheimer’s Association",
+      reviewedAt: "July 27, 2026",
     },
     {
       id: "resource_988",
@@ -436,7 +549,7 @@ export function getCareResources(zipCode = ""): CareResource[] {
       url: "https://988lifeline.org/",
       phone: "988",
       verifiedBy: "U.S. 988 Lifeline",
-      reviewedAt: "July 2026",
+      reviewedAt: "July 27, 2026",
     },
   ];
 }

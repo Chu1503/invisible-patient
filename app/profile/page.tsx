@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import {
   Check,
+  ChevronRight,
   Clock3,
+  ListChecks,
   LogOut,
   MapPin,
   Pencil,
@@ -13,14 +16,17 @@ import { useRouter } from "next/navigation";
 import Navbar from "@/components/Navbar";
 import { clearAccountCache } from "@/lib/cloud-sync";
 import {
+  completeCareTask,
   completeFollowUp,
   getActiveCareRecipient,
+  getCareTasks,
   getCaregiverProfile,
   getFollowUps,
   saveCareRecipient,
   saveCaregiverProfile,
   setActiveCareRecipientId,
   type CareRecipient,
+  type CareTask,
   type CaregiverProfile,
   type FollowUp,
 } from "@/lib/care";
@@ -65,6 +71,7 @@ export default function ProfilePage() {
   const [profile, setProfile] = useState<CaregiverProfile | null>(null);
   const [activeRecipient, setActiveRecipient] =
     useState<CareRecipient | null>(null);
+  const [careTasks, setCareTasks] = useState<CareTask[]>([]);
   const [followUps, setFollowUps] = useState<FollowUp[]>([]);
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingRecipient, setEditingRecipient] = useState(false);
@@ -86,6 +93,7 @@ export default function ProfilePage() {
 
     setProfile(storedProfile);
     setActiveRecipient(storedActive);
+    setCareTasks(getCareTasks());
     setFollowUps(getFollowUps());
 
     setProfileDraft(
@@ -200,6 +208,14 @@ export default function ProfilePage() {
       !followUp.completed &&
       (!activeRecipient || followUp.recipientId === activeRecipient.id)
   );
+  const nextCareTasks = careTasks
+    .filter(
+      (task) =>
+        !task.completed &&
+        (!activeRecipient || task.recipientId === activeRecipient.id)
+    )
+    .sort((a, b) => (a.dueAt ?? Infinity) - (b.dueAt ?? Infinity))
+    .slice(0, 3);
   const profileName =
     profile?.displayName || profileDraft.displayName || "Your profile";
   const profileInitial =
@@ -235,6 +251,44 @@ export default function ProfilePage() {
         )}
 
         <div className="ip-connected-list">
+          <section className="profile-tasks-card">
+            <div className="profile-section-header">
+              <h2>Care tasks</h2>
+              <Link href="/tasks" className="profile-tasks-manage">
+                Manage
+                <ChevronRight size={14} />
+              </Link>
+            </div>
+
+            {nextCareTasks.length ? (
+              <div className="profile-tasks-list">
+                {nextCareTasks.map((task) => (
+                  <div className="profile-task-item" key={task.id}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        completeCareTask(task.id);
+                        refresh();
+                      }}
+                      aria-label={`Mark ${task.title} complete`}
+                    >
+                      <Check size={14} />
+                    </button>
+                    <div>
+                      <p>{task.title}</p>
+                      <span>{profileTaskDueLabel(task.dueAt)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="profile-tasks-empty">
+                <ListChecks size={18} />
+                <p>No care tasks yet.</p>
+              </div>
+            )}
+          </section>
+
           <section className="profile-identity-card">
             <div className="profile-identity-main">
               <div className="profile-avatar" aria-hidden="true">
@@ -486,6 +540,29 @@ function Info({ label, value }: { label: string; value?: string }) {
       <span className="whitespace-pre-line">{value || "Not provided"}</span>
     </div>
   );
+}
+
+function profileTaskDueLabel(dueAt?: number): string {
+  if (!dueAt) return "No due time";
+  const due = new Date(dueAt);
+  const now = new Date();
+  const time = due.toLocaleTimeString([], {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  if (
+    due.getFullYear() === now.getFullYear() &&
+    due.getMonth() === now.getMonth() &&
+    due.getDate() === now.getDate()
+  ) {
+    return `${dueAt < Date.now() ? "Overdue" : "Today"} · ${time}`;
+  }
+
+  return `${due.toLocaleDateString([], {
+    month: "short",
+    day: "numeric",
+  })} · ${time}`;
 }
 
 function Field({

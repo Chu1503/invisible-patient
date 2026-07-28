@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import Navbar from "@/components/Navbar";
 import Aura from "@/components/Aura";
 import { ensureProfile, getLastMentalState, type MentalState } from "@/lib/store";
@@ -39,6 +40,9 @@ export default function HomePage() {
             <div className="ip-home-aura">
               <Aura state={state} />
             </div>
+            <Link href="/talk" className="ip-home-talk-link">
+              Start talking
+            </Link>
           </section>
         </div>
       </div>
