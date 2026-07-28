@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Check,
   ChevronDown,
@@ -64,6 +64,10 @@ export default function ForumPage() {
   const [editText, setEditText] = useState("");
   const [workingItem, setWorkingItem] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<EditingItem | null>(null);
+  const [currentUserTag, setCurrentUserTag] = useState("");
+  const mutationCount = useRef(0);
+  const mutationVersion = useRef(0);
+  const pendingLikes = useRef(new Set<string>());
 
   useEffect(() => {
     const availableTopics = getCircleTopics();
@@ -72,11 +76,14 @@ export default function ForumPage() {
   }, []);
 
   const loadFeed = useCallback(async (silent = false) => {
+    const requestedAtVersion = mutationVersion.current;
     if (!silent) setLoading(true);
     try {
       const feed = await getForumFeed();
+      if (requestedAtVersion !== mutationVersion.current) return;
       setPosts(feed.posts);
       setLikedPostIds(feed.likedPostIds);
+      setCurrentUserTag(feed.currentUserTag);
       setFeedError("");
     } catch {
       setFeedError("The Circle could not refresh. Please try again.");
@@ -88,9 +95,21 @@ export default function ForumPage() {
   useEffect(() => {
     void loadFeed();
     const interval = window.setInterval(() => {
-      if (document.visibilityState === "visible") void loadFeed(true);
-    }, 15_000);
-    return () => window.clearInterval(interval);
+      if (
+        document.visibilityState === "visible" &&
+        mutationCount.current === 0
+      ) {
+        void loadFeed(true);
+      }
+    }, 30_000);
+    const refreshOnFocus = () => {
+      if (mutationCount.current === 0) void loadFeed(true);
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshOnFocus);
+    };
   }, [loadFeed]);
 
   useEffect(() => {
@@ -109,36 +128,132 @@ export default function ForumPage() {
 
   async function submitPost() {
     if (!newPost.trim() || !selectedTopic || submitting) return;
+    const content = newPost.trim();
+    const temporaryId = `pending-post-${Date.now()}`;
+    const pendingPost: ForumPost = {
+      id: temporaryId,
+      content,
+      timestamp: Date.now(),
+      authorTag: currentUserTag || "Posting anonymously",
+      careStage: selectedTopic,
+      replies: [],
+      hasCrisis: detectCrisis(content),
+      likes: 0,
+      isOwned: true,
+      isPending: true,
+    };
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
     setSubmitting(true);
+    setNewPost("");
+    setPosts((current) => [pendingPost, ...current]);
     try {
-      await createPost(newPost.trim(), selectedTopic);
-      setNewPost("");
-      await loadFeed(true);
+      const created = await createPost(
+        content,
+        selectedTopic,
+        currentUserTag || undefined
+      );
+      setPosts((current) => {
+        if (current.some((post) => post.id === temporaryId)) {
+          return current.map((post) =>
+            post.id === temporaryId ? created : post
+          );
+        }
+        return current.some((post) => post.id === created.id)
+          ? current
+          : [created, ...current];
+      });
+      setFeedError("");
     } catch {
+      setPosts((current) =>
+        current.filter((post) => post.id !== temporaryId)
+      );
+      setNewPost((current) => current || content);
       setFeedError("Your post could not be shared. Please try again.");
     } finally {
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
       setSubmitting(false);
     }
   }
 
   async function submitReply(postId: string) {
     if (!replyText.trim() || submitting) return;
+    const content = replyText.trim();
+    const temporaryId = `pending-reply-${Date.now()}`;
+    const pendingReply = {
+      id: temporaryId,
+      content,
+      timestamp: Date.now(),
+      authorTag: currentUserTag || "Posting anonymously",
+      isAI: false,
+      isOwned: true,
+      isPending: true,
+    };
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
     setSubmitting(true);
+    setReplyText("");
+    setPosts((current) =>
+      current.map((post) =>
+        post.id === postId
+          ? { ...post, replies: [...post.replies, pendingReply] }
+          : post
+      )
+    );
     try {
-      await createReply(postId, replyText.trim());
-      setReplyText("");
+      const created = await createReply(
+        postId,
+        content,
+        currentUserTag || undefined
+      );
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                replies: post.replies.some(
+                  (reply) => reply.id === temporaryId
+                )
+                  ? post.replies.map((reply) =>
+                      reply.id === temporaryId ? created : reply
+                    )
+                  : post.replies.some((reply) => reply.id === created.id)
+                    ? post.replies
+                    : [...post.replies, created],
+              }
+            : post
+        )
+      );
       setReplyingTo(null);
       setExpandedPost(postId);
-      await loadFeed(true);
+      setFeedError("");
     } catch {
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                replies: post.replies.filter(
+                  (reply) => reply.id !== temporaryId
+                ),
+              }
+            : post
+        )
+      );
+      setReplyText((current) => current || content);
       setFeedError("Your response could not be shared. Please try again.");
     } finally {
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
       setSubmitting(false);
     }
   }
 
   async function toggleLike(post: ForumPost) {
+    if (pendingLikes.current.has(post.id)) return;
+    pendingLikes.current.add(post.id);
     const currentlyLiked = likedPostIds.has(post.id);
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
     setLikedPostIds((current) => {
       const next = new Set(current);
       if (currentlyLiked) next.delete(post.id);
@@ -159,8 +274,29 @@ export default function ForumPage() {
     try {
       await togglePostLike(post.id, currentlyLiked);
     } catch {
+      setLikedPostIds((current) => {
+        const next = new Set(current);
+        if (currentlyLiked) next.add(post.id);
+        else next.delete(post.id);
+        return next;
+      });
+      setPosts((current) =>
+        current.map((item) =>
+          item.id === post.id
+            ? {
+                ...item,
+                likes: Math.max(
+                  0,
+                  item.likes + (currentlyLiked ? 1 : -1)
+                ),
+              }
+            : item
+        )
+      );
       setFeedError("That reaction could not be saved.");
-      await loadFeed(true);
+    } finally {
+      pendingLikes.current.delete(post.id);
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
     }
   }
 
@@ -178,19 +314,75 @@ export default function ForumPage() {
   async function saveEdit() {
     if (!editingItem || !editText.trim() || workingItem) return;
     const key = `edit-${editingItem.kind}-${editingItem.id}`;
+    const editing = editingItem;
+    const updatedContent = editText.trim();
+    const originalPost =
+      editing.kind === "post"
+        ? posts.find((post) => post.id === editing.id)
+        : undefined;
+    const originalReply =
+      editing.kind === "reply"
+        ? posts
+            .flatMap((post) => post.replies)
+            .find((reply) => reply.id === editing.id)
+        : undefined;
+    const editedAt = Date.now();
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
     setWorkingItem(key);
+    setPosts((current) =>
+      current.map((post) => {
+        if (editing.kind === "post" && post.id === editing.id) {
+          return {
+            ...post,
+            content: updatedContent,
+            hasCrisis: detectCrisis(updatedContent),
+            editedAt,
+          };
+        }
+        if (editing.kind === "reply") {
+          return {
+            ...post,
+            replies: post.replies.map((reply) =>
+              reply.id === editing.id
+                ? { ...reply, content: updatedContent, editedAt }
+                : reply
+            ),
+          };
+        }
+        return post;
+      })
+    );
+    setEditingItem(null);
     try {
-      if (editingItem.kind === "post") {
-        await updateForumPost(editingItem.id, editText.trim());
+      if (editing.kind === "post") {
+        await updateForumPost(editing.id, updatedContent);
       } else {
-        await updateForumReply(editingItem.id, editText.trim());
+        await updateForumReply(editing.id, updatedContent);
       }
-      setEditingItem(null);
       setEditText("");
-      await loadFeed(true);
+      setFeedError("");
     } catch {
+      setPosts((current) =>
+        current.map((post) => {
+          if (originalPost && post.id === originalPost.id) {
+            return originalPost;
+          }
+          if (originalReply) {
+            return {
+              ...post,
+              replies: post.replies.map((reply) =>
+                reply.id === originalReply.id ? originalReply : reply
+              ),
+            };
+          }
+          return post;
+        })
+      );
+      setEditingItem(editing);
       setFeedError("Your changes could not be saved. Please try again.");
     } finally {
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
       setWorkingItem("");
     }
   }
@@ -198,13 +390,46 @@ export default function ForumPage() {
   async function confirmDelete() {
     if (!deleteTarget || workingItem) return;
     const { kind, id } = deleteTarget;
-
+    const deletedPostIndex = posts.findIndex((post) => post.id === id);
+    const deletedPost =
+      kind === "post" && deletedPostIndex >= 0
+        ? posts[deletedPostIndex]
+        : undefined;
+    const replyParent = posts.find((post) =>
+      post.replies.some((reply) => reply.id === id)
+    );
+    const deletedReplyIndex =
+      replyParent?.replies.findIndex((reply) => reply.id === id) ?? -1;
+    const deletedReply =
+      kind === "reply" && deletedReplyIndex >= 0
+        ? replyParent?.replies[deletedReplyIndex]
+        : undefined;
+    const wasLiked = likedPostIds.has(id);
+    const wasExpanded = expandedPost === id;
     const key = `delete-${kind}-${id}`;
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
     setWorkingItem(key);
+    if (kind === "post") {
+      setPosts((current) => current.filter((post) => post.id !== id));
+      setLikedPostIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      if (expandedPost === id) setExpandedPost(null);
+    } else {
+      setPosts((current) =>
+        current.map((post) => ({
+          ...post,
+          replies: post.replies.filter((reply) => reply.id !== id),
+        }))
+      );
+    }
+    setDeleteTarget(null);
     try {
       if (kind === "post") {
         await deleteForumPost(id);
-        if (expandedPost === id) setExpandedPost(null);
       } else {
         await deleteForumReply(id);
       }
@@ -212,15 +437,45 @@ export default function ForumPage() {
         setEditingItem(null);
         setEditText("");
       }
-      setDeleteTarget(null);
-      await loadFeed(true);
+      setFeedError("");
     } catch {
+      setPosts((current) => {
+        if (deletedPost && !current.some((post) => post.id === id)) {
+          const next = [...current];
+          next.splice(Math.min(deletedPostIndex, next.length), 0, deletedPost);
+          return next;
+        }
+        if (replyParent && deletedReply) {
+          return current.map((post) => {
+            if (
+              post.id !== replyParent.id ||
+              post.replies.some((reply) => reply.id === id)
+            ) {
+              return post;
+            }
+            const replies = [...post.replies];
+            replies.splice(
+              Math.min(deletedReplyIndex, replies.length),
+              0,
+              deletedReply
+            );
+            return { ...post, replies };
+          });
+        }
+        return current;
+      });
+      if (wasLiked) {
+        setLikedPostIds((current) => new Set(current).add(id));
+      }
+      if (wasExpanded) setExpandedPost(id);
+      setDeleteTarget({ kind, id });
       setFeedError(
         kind === "post"
           ? "This post could not be deleted."
           : "This response could not be deleted."
       );
     } finally {
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
       setWorkingItem("");
     }
   }
@@ -335,10 +590,14 @@ export default function ForumPage() {
                     </div>
                     <div className="circle-post-controls">
                       <div className="circle-time-meta">
-                        <time>{formatTimeAgo(post.timestamp)}</time>
+                        <time>
+                          {post.isPending
+                            ? "Posting"
+                            : formatTimeAgo(post.timestamp)}
+                        </time>
                         {post.editedAt && <span>Edited</span>}
                       </div>
-                      {post.isOwned && (
+                      {post.isOwned && !post.isPending && (
                         <div className="circle-owner-actions">
                           <button
                             type="button"
@@ -391,6 +650,7 @@ export default function ForumPage() {
                         setReplyingTo(null);
                       }}
                       type="button"
+                      disabled={post.isPending}
                       aria-label={isExpanded ? "Hide responses" : "Show responses"}
                     >
                       <MessageCircle size={16} />
@@ -400,6 +660,7 @@ export default function ForumPage() {
                       className={isLiked ? "is-liked" : ""}
                       type="button"
                       aria-label={isLiked ? "Remove reaction" : "Support post"}
+                      disabled={post.isPending}
                       onClick={() => void toggleLike(post)}
                     >
                       <Heart size={16} fill={isLiked ? "currentColor" : "none"} />
@@ -411,6 +672,7 @@ export default function ForumPage() {
                         setReplyingTo(post.id);
                       }}
                       type="button"
+                      disabled={post.isPending}
                     >
                       Respond
                     </button>
@@ -427,10 +689,14 @@ export default function ForumPage() {
                             <span>{reply.authorTag}</span>
                             <div className="circle-reply-controls">
                               <div className="circle-time-meta">
-                                <time>{formatTimeAgo(reply.timestamp)}</time>
+                                <time>
+                                  {reply.isPending
+                                    ? "Posting"
+                                    : formatTimeAgo(reply.timestamp)}
+                                </time>
                                 {reply.editedAt && <span>Edited</span>}
                               </div>
-                              {reply.isOwned && (
+                              {reply.isOwned && !reply.isPending && (
                                 <div className="circle-owner-actions">
                                   <button
                                     type="button"

@@ -1,6 +1,7 @@
 "use client";
 
 import { getActiveCareRecipient } from "./care";
+import { logDevelopmentTiming, perfStart } from "./performance";
 import { createClient } from "./supabase/client";
 
 export interface ForumPost {
@@ -13,6 +14,7 @@ export interface ForumPost {
   hasCrisis: boolean;
   likes: number;
   isOwned: boolean;
+  isPending?: boolean;
   editedAt?: number;
 }
 
@@ -23,12 +25,14 @@ export interface ForumReply {
   authorTag: string;
   isAI: boolean;
   isOwned: boolean;
+  isPending?: boolean;
   editedAt?: number;
 }
 
 export interface ForumFeed {
   posts: ForumPost[];
   likedPostIds: Set<string>;
+  currentUserTag: string;
 }
 
 const GENERAL_TOPICS = [
@@ -70,6 +74,8 @@ const CRISIS_WORDS = [
   "hurt them",
 ];
 
+let anonymousTagPromise: Promise<string> | null = null;
+
 type ReplyRow = {
   id: string;
   content: string;
@@ -104,16 +110,27 @@ function stableHash(value: string): number {
 }
 
 async function getAnonymousTag(): Promise<string> {
-  const { data, error } = await createClient().auth.getClaims();
-  const userId = data?.claims.sub;
-  if (error || !userId) throw error ?? new Error("Authentication required");
+  if (!anonymousTagPromise) {
+    anonymousTagPromise = (async () => {
+      const { data, error } = await createClient().auth.getClaims();
+      const userId = data?.claims.sub;
+      if (error || !userId) {
+        throw error ?? new Error("Authentication required");
+      }
 
-  const firstHash = stableHash(userId);
-  const secondHash = stableHash(`${userId}:circle`);
-  const adjective = ALIAS_ADJECTIVES[firstHash % ALIAS_ADJECTIVES.length];
-  const noun = ALIAS_NOUNS[secondHash % ALIAS_NOUNS.length];
-  const number = (stableHash(`${userId}:number`) % 90) + 10;
-  return `${adjective}${noun}${number}`;
+      const firstHash = stableHash(userId);
+      const secondHash = stableHash(`${userId}:circle`);
+      const adjective = ALIAS_ADJECTIVES[firstHash % ALIAS_ADJECTIVES.length];
+      const noun = ALIAS_NOUNS[secondHash % ALIAS_NOUNS.length];
+      const number = (stableHash(`${userId}:number`) % 90) + 10;
+      return `${adjective}${noun}${number}`;
+    })().catch((error) => {
+      anonymousTagPromise = null;
+      throw error;
+    });
+  }
+
+  return anonymousTagPromise;
 }
 
 function stageLabel(stage: string): string {
@@ -143,25 +160,27 @@ export function detectCrisis(text: string): boolean {
 }
 
 export async function getForumFeed(): Promise<ForumFeed> {
+  const feedStartedAt = perfStart();
   const supabase = createClient();
-  const { data, error } = await supabase
-    .from("circle_posts")
-    .select(
-      "id, content, topic, anonymous_tag, created_at, edited_at, likes_count, circle_replies(id, content, anonymous_tag, created_at, edited_at)"
-    )
-    .order("created_at", { ascending: false })
-    .limit(50);
+  const [postsResult, ownershipResult, currentUserTag] = await Promise.all([
+    supabase
+      .from("circle_posts")
+      .select(
+        "id, content, topic, anonymous_tag, created_at, edited_at, likes_count, circle_replies(id, content, anonymous_tag, created_at, edited_at)"
+      )
+      .order("created_at", { ascending: false })
+      .limit(50),
+    supabase.rpc("get_my_circle_content_ids"),
+    getAnonymousTag(),
+  ]);
 
-  if (error) throw error;
+  if (postsResult.error) throw postsResult.error;
+  if (ownershipResult.error) throw ownershipResult.error;
 
-  const rows = (data ?? []) as PostRow[];
+  const rows = (postsResult.data ?? []) as PostRow[];
   const postIds = rows.map((row) => row.id);
   let likedPostIds = new Set<string>();
-  const { data: ownedContent, error: ownershipError } = await supabase.rpc(
-    "get_my_circle_content_ids"
-  );
-  if (ownershipError) throw ownershipError;
-  const ownedRows = (ownedContent ?? []) as OwnedContentRow[];
+  const ownedRows = (ownershipResult.data ?? []) as OwnedContentRow[];
   const ownedPostIds = new Set(
     ownedRows
       .filter((row) => row.content_type === "post")
@@ -211,31 +230,73 @@ export async function getForumFeed(): Promise<ForumFeed> {
       .sort((a, b) => a.timestamp - b.timestamp),
   }));
 
-  return { posts, likedPostIds };
+  logDevelopmentTiming("circle.feed", feedStartedAt);
+  return { posts, likedPostIds, currentUserTag };
 }
 
 export async function createPost(
   content: string,
-  topic: string
-): Promise<void> {
-  const { error } = await createClient().from("circle_posts").insert({
-    content,
-    topic,
-    anonymous_tag: await getAnonymousTag(),
-  });
+  topic: string,
+  knownAnonymousTag?: string
+): Promise<ForumPost> {
+  const anonymousTag = knownAnonymousTag ?? (await getAnonymousTag());
+  const { data, error } = await createClient()
+    .from("circle_posts")
+    .insert({
+      content,
+      topic,
+      anonymous_tag: anonymousTag,
+    })
+    .select(
+      "id, content, topic, anonymous_tag, created_at, edited_at, likes_count"
+    )
+    .single();
   if (error) throw error;
+  const row = data as Omit<PostRow, "circle_replies">;
+  return {
+    id: row.id,
+    content: row.content,
+    timestamp: new Date(row.created_at).getTime(),
+    authorTag: row.anonymous_tag,
+    careStage: row.topic,
+    replies: [],
+    hasCrisis: detectCrisis(row.content),
+    likes: row.likes_count,
+    isOwned: true,
+    editedAt: row.edited_at
+      ? new Date(row.edited_at).getTime()
+      : undefined,
+  };
 }
 
 export async function createReply(
   postId: string,
-  content: string
-): Promise<void> {
-  const { error } = await createClient().from("circle_replies").insert({
-    post_id: postId,
-    content,
-    anonymous_tag: await getAnonymousTag(),
-  });
+  content: string,
+  knownAnonymousTag?: string
+): Promise<ForumReply> {
+  const anonymousTag = knownAnonymousTag ?? (await getAnonymousTag());
+  const { data, error } = await createClient()
+    .from("circle_replies")
+    .insert({
+      post_id: postId,
+      content,
+      anonymous_tag: anonymousTag,
+    })
+    .select("id, content, anonymous_tag, created_at, edited_at")
+    .single();
   if (error) throw error;
+  const row = data as ReplyRow;
+  return {
+    id: row.id,
+    content: row.content,
+    timestamp: new Date(row.created_at).getTime(),
+    authorTag: row.anonymous_tag,
+    isAI: false,
+    isOwned: true,
+    editedAt: row.edited_at
+      ? new Date(row.edited_at).getTime()
+      : undefined,
+  };
 }
 
 export async function togglePostLike(

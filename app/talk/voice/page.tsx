@@ -20,6 +20,8 @@ import {
   type CareWorkflowResult,
   type CaregiverProfile,
 } from "@/lib/care";
+import { buildCareWorkflow } from "@/lib/care-workflows";
+import { logDevelopmentTiming, perfStart } from "@/lib/performance";
 
 const ZBI_LABELS = ["Never", "Rarely", "Sometimes", "Frequently", "Nearly Always"];
 
@@ -383,30 +385,22 @@ export default function VoicePage() {
     });
 
     let workflow: CareWorkflowResult | null = null;
+    const workflowStartedAt = perfStart();
     try {
-      const workflowResponse = await fetch("/api/workflow", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: cleanedText,
-          recipient,
-          recentEvents: getCareEvents().slice(0, 20),
-          zipCode: caregiver?.zipCode,
-          caregiverName: caregiver?.displayName,
-        }),
+      workflow = buildCareWorkflow({
+        message: cleanedText,
+        recipient,
+        recentEvents: getCareEvents().slice(0, 20),
+        zipCode: caregiver?.zipCode,
+        caregiverName: caregiver?.displayName,
       });
-      if (workflowResponse.ok) {
-        const preparedWorkflow =
-          (await workflowResponse.json()) as CareWorkflowResult | null;
-        if (preparedWorkflow) {
-          workflow = preparedWorkflow;
-          saveWorkflowResult(preparedWorkflow);
-        }
-      }
+      if (workflow) saveWorkflowResult(workflow);
     } catch {
       workflow = null;
     }
+    logDevelopmentTiming("voice.workflow", workflowStartedAt);
 
+    const chatStartedAt = perfStart();
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: {
@@ -436,6 +430,7 @@ export default function VoicePage() {
       );
       return;
     }
+    logDevelopmentTiming("voice.chat-response", chatStartedAt);
 
     const assistantMsg: Message = {
       id: generateId(),
@@ -449,10 +444,15 @@ export default function VoicePage() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let full = "";
+    let receivedFirstChunk = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (!receivedFirstChunk) {
+        receivedFirstChunk = true;
+        logDevelopmentTiming("voice.first-token", chatStartedAt);
+      }
 
       full += decoder.decode(value, { stream: true });
 
@@ -464,6 +464,7 @@ export default function VoicePage() {
     }
 
     const { clean, qIndex } = parseZbiTag(full);
+    logDevelopmentTiming("voice.stream-complete", chatStartedAt);
 
     if (qIndex !== null && qIndex === updatedZbiAnswers.length) {
       setPendingZbiQ(qIndex);

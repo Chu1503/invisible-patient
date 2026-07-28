@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { CloudOff, LogOut, RefreshCw } from "lucide-react";
 import type { AuthChangeEvent } from "@supabase/supabase-js";
@@ -34,6 +34,8 @@ export default function AccountDataGate({
   const [ready, setReady] = useState(doesNotNeedHydration(pathname));
   const [error, setError] = useState("");
   const [signingOut, setSigningOut] = useState(false);
+  const hydrated = useRef(false);
+  const hydrating = useRef(false);
 
   const hydrate = useCallback(async () => {
     if (doesNotNeedHydration(pathname) || !isSupabaseConfigured()) {
@@ -41,20 +43,31 @@ export default function AccountDataGate({
       return;
     }
 
+    if (hydrated.current) {
+      setReady(true);
+      return;
+    }
+    if (hydrating.current) return;
+
+    hydrating.current = true;
     setReady(false);
     setError("");
     for (let attempt = 0; attempt <= HYDRATION_RETRY_DELAYS.length; attempt += 1) {
       try {
         const result = await hydrateAccountData();
         if (!result.hasProfile) {
+          hydrating.current = false;
           router.replace("/setup");
           return;
         }
+        hydrated.current = true;
+        hydrating.current = false;
         setReady(true);
         return;
       } catch (hydrationError) {
         if (hydrationError instanceof AccountAuthenticationRequiredError) {
           clearAccountCache();
+          hydrating.current = false;
           router.replace("/auth");
           return;
         }
@@ -68,6 +81,7 @@ export default function AccountDataGate({
         setError(
           "We could not open your account just now. Your information is still safe."
         );
+        hydrating.current = false;
       }
     }
   }, [pathname, router]);
@@ -83,6 +97,8 @@ export default function AccountDataGate({
       data: { subscription },
     } = createClient().auth.onAuthStateChange((event: AuthChangeEvent) => {
       if (event === "SIGNED_OUT") {
+        hydrated.current = false;
+        hydrating.current = false;
         clearAccountCache();
         router.replace("/auth");
       }

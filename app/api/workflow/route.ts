@@ -3,6 +3,7 @@ import { buildCareWorkflow } from "@/lib/care-workflows";
 import type { CareEvent, CareRecipient } from "@/lib/care";
 import { createClient as createSupabaseClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { logDevelopmentTiming, perfStart } from "@/lib/performance";
 
 const MAX_REQUEST_BYTES = 50_000;
 
@@ -15,6 +16,7 @@ interface WorkflowRequest {
 }
 
 export async function POST(req: Request) {
+  const requestStartedAt = perfStart();
   if (!isSupabaseConfigured()) {
     return NextResponse.json(
       { error: "Account storage is not configured." },
@@ -68,6 +70,7 @@ export async function POST(req: Request) {
     zipCode: body.zipCode,
     caregiverName: body.caregiverName,
   });
+  logDevelopmentTiming("workflow-api.total", requestStartedAt);
 
   return NextResponse.json(workflow, {
     headers: { "Cache-Control": "private, no-store" },

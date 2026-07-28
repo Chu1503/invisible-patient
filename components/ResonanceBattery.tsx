@@ -28,7 +28,6 @@ export default function ResonanceBattery({ value }: { value: number }) {
           <div className="absolute inset-0 flex items-center justify-center">
             <span className="text-sm font-medium text-[#F5F0E8]" style={{ fontFamily: "var(--font-display)" }}>
               {pct}
-              <span className="text-[9px] text-[#A09890]">/100</span>
             </span>
           </div>
         </div>

@@ -9,7 +9,8 @@ import type {
   CareWorkflowResult,
   FollowUp,
 } from "./care";
-import type { CheckinEntry, MentalState, Message } from "./store";
+import type { CheckinEntry, MentalState } from "./store";
+import { logDevelopmentTiming, perfStart } from "./performance";
 import { createClient } from "./supabase/client";
 import { isSupabaseConfigured } from "./supabase/config";
 
@@ -317,57 +318,66 @@ export function syncWorkflowResult(
     );
     if (eventResult.error) return eventResult;
 
-    const planResult = await supabase.from("action_plans").upsert(
-      {
-        user_id: currentUserId,
-        id: workflow.actionPlan.id,
-        event_id: workflow.actionPlan.eventId,
-        title: workflow.actionPlan.title,
-        steps: workflow.actionPlan.steps,
-        source_title: workflow.actionPlan.sourceTitle,
-        source_url: workflow.actionPlan.sourceUrl,
-        reviewed_at: workflow.actionPlan.reviewedAt,
-        created_at: iso(workflow.actionPlan.createdAt),
-      },
-      { onConflict: "user_id,id" }
-    );
-    if (planResult.error) return planResult;
-
-    for (const task of workflow.tasks) {
-      const taskResult = await supabase.from("care_tasks").upsert(
+    const childWrites = [
+      supabase.from("action_plans").upsert(
         {
           user_id: currentUserId,
-          id: task.id,
-          recipient_id: task.recipientId,
-          event_id: task.eventId ?? null,
-          title: task.title,
-          owner_name: task.owner,
-          due_at: iso(task.dueAt),
-          completed: task.completed,
-          created_at: iso(task.createdAt),
+          id: workflow.actionPlan.id,
+          event_id: workflow.actionPlan.eventId,
+          title: workflow.actionPlan.title,
+          steps: workflow.actionPlan.steps,
+          source_title: workflow.actionPlan.sourceTitle,
+          source_url: workflow.actionPlan.sourceUrl,
+          reviewed_at: workflow.actionPlan.reviewedAt,
+          created_at: iso(workflow.actionPlan.createdAt),
         },
         { onConflict: "user_id,id" }
+      ),
+    ];
+
+    if (workflow.tasks.length) {
+      childWrites.push(
+        supabase.from("care_tasks").upsert(
+          workflow.tasks.map((task) => ({
+            user_id: currentUserId,
+            id: task.id,
+            recipient_id: task.recipientId,
+            event_id: task.eventId ?? null,
+            title: task.title,
+            details: task.details ?? "",
+            owner_name: task.owner,
+            due_at: iso(task.dueAt),
+            recurrence: task.recurrence ?? "none",
+            reminder_minutes: task.reminderMinutes ?? null,
+            last_completed_at: iso(task.lastCompletedAt),
+            completed: task.completed,
+            created_at: iso(task.createdAt),
+          })),
+          { onConflict: "user_id,id" }
+        )
       );
-      if (taskResult.error) return taskResult;
     }
 
     if (includeFollowUp) {
-      return supabase.from("follow_ups").upsert(
-        {
-          user_id: currentUserId,
-          id: workflow.followUp.id,
-          recipient_id: workflow.followUp.recipientId,
-          event_id: workflow.followUp.eventId,
-          prompt: workflow.followUp.prompt,
-          due_at: iso(workflow.followUp.dueAt),
-          completed: workflow.followUp.completed,
-          created_at: iso(workflow.followUp.createdAt),
-        },
-        { onConflict: "user_id,id" }
+      childWrites.push(
+        supabase.from("follow_ups").upsert(
+          {
+            user_id: currentUserId,
+            id: workflow.followUp.id,
+            recipient_id: workflow.followUp.recipientId,
+            event_id: workflow.followUp.eventId,
+            prompt: workflow.followUp.prompt,
+            due_at: iso(workflow.followUp.dueAt),
+            completed: workflow.followUp.completed,
+            created_at: iso(workflow.followUp.createdAt),
+          },
+          { onConflict: "user_id,id" }
+        )
       );
     }
 
-    return { error: null };
+    const childResults = await Promise.all(childWrites);
+    return { error: childResults.find((result) => result.error)?.error ?? null };
   });
 }
 
@@ -380,13 +390,10 @@ export class AccountAuthenticationRequiredError extends Error {
   }
 }
 
-function messages(value: unknown): Message[] {
-  return Array.isArray(value) ? (value as Message[]) : [];
-}
-
 export async function hydrateAccountData(): Promise<{
   hasProfile: boolean;
 }> {
+  const hydrationStartedAt = perfStart();
   if (!isSupabaseConfigured()) return { hasProfile: false };
 
   const supabase = createClient();
@@ -410,21 +417,48 @@ export async function hydrateAccountData(): Promise<{
     tasksResult,
     followUpsResult,
   ] = await Promise.all([
-    supabase.from("profiles").select("*").maybeSingle(),
-    supabase.from("care_recipients").select("*").order("created_at"),
-    supabase.from("checkins").select("*").order("occurred_at"),
-    supabase.from("care_events").select("*").order("occurred_at", {
-      ascending: false,
-    }),
-    supabase.from("action_plans").select("*").order("created_at", {
-      ascending: false,
-    }),
-    supabase.from("care_tasks").select("*").order("created_at", {
-      ascending: false,
-    }),
-    supabase.from("follow_ups").select("*").order("created_at", {
-      ascending: false,
-    }),
+    supabase
+      .from("profiles")
+      .select(
+        "display_name, zip_code, role, employer, shift, experience, communication_preference, support_contact, last_mental_state, created_at, updated_at"
+      )
+      .maybeSingle(),
+    supabase
+      .from("care_recipients")
+      .select(
+        "id, client_code, condition, stage, living_situation, mobility, known_triggers, care_notes, is_active, created_at, updated_at"
+      )
+      .order("created_at"),
+    supabase
+      .from("checkins")
+      .select(
+        "session_id, checkin_date, occurred_at, mental_state, zbi_estimate, zbi_answers, resonance_score, emotions, risk_level"
+      )
+      .order("occurred_at"),
+    supabase
+      .from("care_events")
+      .select(
+        "id, recipient_id, issue, summary, risk, trigger, outcome, status, occurred_at"
+      )
+      .order("occurred_at", { ascending: false }),
+    supabase
+      .from("action_plans")
+      .select(
+        "id, event_id, title, steps, source_title, source_url, reviewed_at, created_at"
+      )
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("care_tasks")
+      .select(
+        "id, recipient_id, event_id, title, details, owner_name, due_at, recurrence, reminder_minutes, last_completed_at, completed, created_at"
+      )
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("follow_ups")
+      .select(
+        "id, recipient_id, event_id, prompt, due_at, completed, created_at"
+      )
+      .order("created_at", { ascending: false }),
   ]);
 
   const firstError = [
@@ -437,6 +471,7 @@ export async function hydrateAccountData(): Promise<{
     followUpsResult.error,
   ].find(Boolean);
   if (firstError) throw firstError;
+  logDevelopmentTiming("account-hydration.network", hydrationStartedAt);
 
   clearAccountCache();
   localStorage.setItem("ip_cache_user_id", currentUserId);
@@ -504,7 +539,7 @@ export async function hydrateAccountData(): Promise<{
     resonanceScore: Number(row.resonance_score ?? 50),
     emotions: Array.isArray(row.emotions) ? (row.emotions as string[]) : [],
     riskLevel: row.risk_level as CheckinEntry["riskLevel"],
-    messages: messages(row.messages),
+    messages: [],
   }));
   localStorage.setItem("ip_checkins", JSON.stringify(checkins));
 
@@ -575,5 +610,6 @@ export async function hydrateAccountData(): Promise<{
   localStorage.setItem("ip_follow_ups", JSON.stringify(followUps));
 
   window.dispatchEvent(new Event("ip-account-data-ready"));
+  logDevelopmentTiming("account-hydration.total", hydrationStartedAt);
   return { hasProfile: Boolean(profileRow) };
 }

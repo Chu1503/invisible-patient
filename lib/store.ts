@@ -90,6 +90,13 @@ export function getLatestCheckin(): CheckinEntry | null {
   return checkins.sort((a, b) => b.timestamp - a.timestamp)[0];
 }
 
+export function getLatestZbiCheckin(): CheckinEntry | null {
+  const checkins = getCheckins()
+    .filter((checkin) => (checkin.zbiAnswers ?? []).length > 0)
+    .sort((a, b) => b.timestamp - a.timestamp);
+  return checkins[0] ?? null;
+}
+
 export function getLastMentalState(): MentalState {
   if (typeof window === "undefined") return "restless";
   return (localStorage.getItem(KEYS.lastState) as MentalState) || "restless";

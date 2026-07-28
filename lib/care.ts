@@ -251,7 +251,10 @@ export function getCareEvents(): CareEvent[] {
   return readLocal<CareEvent[]>(KEYS.events, []);
 }
 
-export function saveCareEvent(event: CareEvent): void {
+export function saveCareEvent(
+  event: CareEvent,
+  synchronize = true
+): void {
   const events = getCareEvents();
   const existing = events.some((item) => item.id === event.id);
   writeLocal(
@@ -260,7 +263,7 @@ export function saveCareEvent(event: CareEvent): void {
       ? events.map((item) => (item.id === event.id ? event : item))
       : [event, ...events]
   );
-  syncCareEvent(event);
+  if (synchronize) syncCareEvent(event);
 }
 
 export function updateCareEventOutcome(eventId: string, outcome: string): void {
@@ -277,11 +280,14 @@ export function getActionPlans(): ActionPlan[] {
   return readLocal<ActionPlan[]>(KEYS.plans, []);
 }
 
-export function saveActionPlan(plan: ActionPlan): void {
+export function saveActionPlan(
+  plan: ActionPlan,
+  synchronize = true
+): void {
   const plans = getActionPlans();
   if (plans.some((item) => item.id === plan.id)) return;
   writeLocal(KEYS.plans, [plan, ...plans]);
-  syncActionPlan(plan);
+  if (synchronize) syncActionPlan(plan);
 }
 
 export function getCareTasks(): CareTask[] {
@@ -293,7 +299,10 @@ function notifyCareTaskChange(): void {
   window.dispatchEvent(new Event("ip-care-tasks-changed"));
 }
 
-export function saveCareTask(task: CareTask): void {
+export function saveCareTask(
+  task: CareTask,
+  synchronize = true
+): void {
   const tasks = getCareTasks();
   const existing = tasks.some((item) => item.id === task.id);
   const normalized: CareTask = {
@@ -308,7 +317,7 @@ export function saveCareTask(task: CareTask): void {
       ? tasks.map((item) => (item.id === task.id ? normalized : item))
       : [normalized, ...tasks]
   );
-  syncCareTask(normalized);
+  if (synchronize) syncCareTask(normalized);
   notifyCareTaskChange();
 }
 
@@ -375,11 +384,14 @@ export function getFollowUps(): FollowUp[] {
   );
 }
 
-export function saveFollowUp(followUp: FollowUp): void {
+export function saveFollowUp(
+  followUp: FollowUp,
+  synchronize = true
+): void {
   const followUps = getFollowUps();
   if (followUps.some((item) => item.id === followUp.id)) return;
   writeLocal(KEYS.followUps, [followUp, ...followUps]);
-  syncFollowUp(followUp);
+  if (synchronize) syncFollowUp(followUp);
 }
 
 export function completeFollowUp(followUpId: string): void {
@@ -404,11 +416,11 @@ export function saveWorkflowResult(workflow: CareWorkflowResult): void {
     );
   });
 
-  saveCareEvent(workflow.event);
-  saveActionPlan(workflow.actionPlan);
-  workflow.tasks.forEach(saveCareTask);
+  saveCareEvent(workflow.event, false);
+  saveActionPlan(workflow.actionPlan, false);
+  workflow.tasks.forEach((task) => saveCareTask(task, false));
   if (!hasMatchingOpenFollowUp) {
-    saveFollowUp(workflow.followUp);
+    saveFollowUp(workflow.followUp, false);
   }
   writeLocal(KEYS.latestWorkflow, workflow);
   syncWorkflowResult(workflow, !hasMatchingOpenFollowUp);

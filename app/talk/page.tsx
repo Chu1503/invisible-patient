@@ -21,6 +21,8 @@ import {
   type CareWorkflowResult,
   type CaregiverProfile,
 } from "@/lib/care";
+import { buildCareWorkflow } from "@/lib/care-workflows";
+import { logDevelopmentTiming, perfStart } from "@/lib/performance";
 
 function sanitize(text: string): string {
   return text.replace(/\s*[\u2013\u2014]\s*/g, ", ").trim();
@@ -110,30 +112,22 @@ export default function TalkPage() {
     });
 
     let workflow: CareWorkflowResult | null = null;
+    const workflowStartedAt = perfStart();
     try {
-      const workflowResponse = await fetch("/api/workflow", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: caregiverText,
-          recipient,
-          recentEvents: getCareEvents().slice(0, 20),
-          zipCode: caregiver?.zipCode,
-          caregiverName: caregiver?.displayName,
-        }),
+      workflow = buildCareWorkflow({
+        message: caregiverText,
+        recipient,
+        recentEvents: getCareEvents().slice(0, 20),
+        zipCode: caregiver?.zipCode,
+        caregiverName: caregiver?.displayName,
       });
-      if (workflowResponse.ok) {
-        const preparedWorkflow =
-          (await workflowResponse.json()) as CareWorkflowResult | null;
-        if (preparedWorkflow) {
-          workflow = preparedWorkflow;
-          saveWorkflowResult(preparedWorkflow);
-        }
-      }
+      if (workflow) saveWorkflowResult(workflow);
     } catch {
       workflow = null;
     }
+    logDevelopmentTiming("talk.workflow", workflowStartedAt);
 
+    const chatStartedAt = perfStart();
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: {
@@ -162,6 +156,7 @@ export default function TalkPage() {
       );
       return;
     }
+    logDevelopmentTiming("talk.chat-response", chatStartedAt);
 
     const assistantMsg: Message = {
       id: generateId(),
@@ -175,10 +170,15 @@ export default function TalkPage() {
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let full = "";
+    let receivedFirstChunk = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (!receivedFirstChunk) {
+        receivedFirstChunk = true;
+        logDevelopmentTiming("talk.first-token", chatStartedAt);
+      }
 
       full += decoder.decode(value, { stream: true });
 
@@ -190,6 +190,7 @@ export default function TalkPage() {
     }
 
     setLoading(false);
+    logDevelopmentTiming("talk.stream-complete", chatStartedAt);
 
     const { qIndex } = parseZbiTag(full);
 

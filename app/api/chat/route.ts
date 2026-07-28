@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { buildSystemPrompt } from "@/lib/prompts";
 import { createClient as createSupabaseClient } from "@/lib/supabase/server";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { logDevelopmentTiming, perfStart } from "@/lib/performance";
 
 const MAX_REQUEST_BYTES = 100_000;
 const MAX_MESSAGES = 40;
@@ -10,6 +11,7 @@ const MAX_TOTAL_MESSAGE_CHARACTERS = 50_000;
 const MAX_CONTEXT_CHARACTERS = 20_000;
 
 export async function POST(req: Request) {
+  const requestStartedAt = perfStart();
   try {
     if (!isSupabaseConfigured()) {
       return new Response("Account storage is not configured.", { status: 503 });
@@ -27,8 +29,10 @@ export async function POST(req: Request) {
       return new Response("The conversation is too large.", { status: 413 });
     }
 
+    const authStartedAt = perfStart();
     const supabase = await createSupabaseClient();
     const { data: claimsData } = await supabase.auth.getClaims();
+    logDevelopmentTiming("chat-api.auth", authStartedAt);
     if (!claimsData?.claims.sub) {
       return new Response("Authentication required.", { status: 401 });
     }
@@ -65,6 +69,7 @@ export async function POST(req: Request) {
       return new Response("A conversation is required.", { status: 400 });
     }
 
+    const streamStartedAt = perfStart();
     const client = new Anthropic({ apiKey });
     const stream = await client.messages.stream({
       model: "claude-opus-4-5",
@@ -72,6 +77,8 @@ export async function POST(req: Request) {
       system: buildSystemPrompt(context),
       messages,
     });
+    logDevelopmentTiming("chat-api.stream-ready", streamStartedAt);
+    logDevelopmentTiming("chat-api.response-ready", requestStartedAt);
 
     const encoder = new TextEncoder();
     const readable = new ReadableStream({

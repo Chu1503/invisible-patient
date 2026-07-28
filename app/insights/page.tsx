@@ -8,17 +8,20 @@ import ResonanceChart from "@/components/ResonanceChart";
 import {
   getLast7DaysCheckins,
   getLatestCheckin,
+  getLatestZbiCheckin,
   type CheckinEntry,
 } from "@/lib/store";
 
 export default function InsightsPage() {
   const [latest, setLatest] = useState<CheckinEntry | null>(null);
+  const [latestZbi, setLatestZbi] = useState<CheckinEntry | null>(null);
   const [week, setWeek] = useState<CheckinEntry[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
       setLatest(getLatestCheckin());
+      setLatestZbi(getLatestZbiCheckin());
       setWeek(getLast7DaysCheckins());
       setLoaded(true);
     }, 0);
@@ -52,23 +55,23 @@ export default function InsightsPage() {
                   style={{ fontFamily: "var(--font-display)", color: "#F2D461" }}
                   className="mb-2 text-5xl font-light"
                 >
-                  {Math.round(latest.zbiEstimate)}
+                  {Math.round((latestZbi ?? latest).zbiEstimate)}
                   <span className="text-xl text-[#A09890]">/48</span>
                 </p>
                 <p className="mb-4 text-xs text-[#A09890]">
-                  {(latest.zbiAnswers ?? []).length < 12
-                    ? `Based on ${(latest.zbiAnswers ?? []).length} of 12 questions`
+                  {((latestZbi ?? latest).zbiAnswers ?? []).length < 12
+                    ? `Based on ${((latestZbi ?? latest).zbiAnswers ?? []).length} of 12 questions`
                     : "All 12 questions answered"}
                 </p>
                 <div className="h-1.5 overflow-hidden rounded-full bg-white/5">
                   <div
                     className="h-full rounded-full transition-all duration-1000"
                     style={{
-                      width: `${(latest.zbiEstimate / 48) * 100}%`,
+                      width: `${((latestZbi ?? latest).zbiEstimate / 48) * 100}%`,
                       backgroundColor:
-                        latest.zbiEstimate >= 36
+                        (latestZbi ?? latest).zbiEstimate >= 36
                           ? "#C99724"
-                          : latest.zbiEstimate >= 24
+                          : (latestZbi ?? latest).zbiEstimate >= 24
                             ? "#DDBB43"
                             : "#F2D461",
                     }}
