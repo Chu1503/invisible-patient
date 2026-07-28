@@ -60,6 +60,12 @@ const sections = [
           "Check ins",
           "Care events",
           "Progress tracking",
+          "Anonymous Circle posts and responses",
+        ],
+      },
+      {
+        paragraphs: [
+          "Circle posts and responses are visible to other signed in users. They use a generated alias in the application, but remain linked to your account internally for security and moderation.",
         ],
       },
       {

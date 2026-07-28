@@ -1,18 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Check, ChevronDown, Heart, MessageCircle } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import {
-  CARE_STAGES,
   createPost,
   createReply,
   detectCrisis,
   formatTimeAgo,
-  getMyStage,
-  getPosts,
-  saveMyStage,
-  savePosts,
+  getCircleTopics,
+  getForumFeed,
+  togglePostLike,
   type ForumPost,
 } from "@/lib/forum";
 
@@ -33,84 +31,100 @@ const CRISIS_RESOURCES = (
 
 export default function ForumPage() {
   const [posts, setPosts] = useState<ForumPost[]>([]);
-  const [myStage, setMyStage] = useState(CARE_STAGES[0]);
+  const [topics, setTopics] = useState<string[]>([]);
+  const [selectedTopic, setSelectedTopic] = useState("");
+  const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set());
   const [newPost, setNewPost] = useState("");
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [expandedPost, setExpandedPost] = useState<string | null>(null);
   const [stagePickerOpen, setStagePickerOpen] = useState(false);
-  const [aiLoading, setAiLoading] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [feedError, setFeedError] = useState("");
 
   useEffect(() => {
-    setPosts(getPosts());
-    setMyStage(getMyStage());
+    const availableTopics = getCircleTopics();
+    setTopics(availableTopics);
+    setSelectedTopic(availableTopics[0] ?? "");
   }, []);
 
-  function submitPost() {
-    if (!newPost.trim()) return;
-    const post = createPost(newPost.trim(), myStage);
-    const updated = [post, ...posts];
-    setPosts(updated);
-    savePosts(updated);
-    setNewPost("");
-    setExpandedPost(post.id);
-    if (post.hasCrisis) {
-      getAIReply(post.id, post.content, updated);
-    }
-  }
-
-  function submitReply(postId: string) {
-    if (!replyText.trim()) return;
-    const submittedText = replyText.trim();
-    const reply = createReply(submittedText);
-    const updated = posts.map((post) =>
-      post.id === postId
-        ? { ...post, replies: [...post.replies, reply] }
-        : post
-    );
-    setPosts(updated);
-    savePosts(updated);
-    setReplyText("");
-    setReplyingTo(null);
-    if (detectCrisis(submittedText)) {
-      getAIReply(postId, submittedText, updated);
-    }
-  }
-
-  async function getAIReply(
-    postId: string,
-    triggerText: string,
-    currentPosts: ForumPost[]
-  ) {
-    setAiLoading(postId);
+  const loadFeed = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: [{ role: "user", content: triggerText }],
-          context: { riskLevel: "crisis", zbiAnswers: [], dominantThemes: [] },
-        }),
-      });
-      if (!response.body) return;
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let full = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        full += decoder.decode(value);
-      }
-      const aiReply = createReply(full.trim(), true);
-      const updated = currentPosts.map((post) =>
-        post.id === postId
-          ? { ...post, replies: [...post.replies, aiReply] }
-          : post
-      );
-      setPosts(updated);
-      savePosts(updated);
+      const feed = await getForumFeed();
+      setPosts(feed.posts);
+      setLikedPostIds(feed.likedPostIds);
+      setFeedError("");
+    } catch {
+      setFeedError("The Circle could not refresh. Please try again.");
     } finally {
-      setAiLoading(null);
+      if (!silent) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadFeed();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void loadFeed(true);
+    }, 15_000);
+    return () => window.clearInterval(interval);
+  }, [loadFeed]);
+
+  async function submitPost() {
+    if (!newPost.trim() || !selectedTopic || submitting) return;
+    setSubmitting(true);
+    try {
+      await createPost(newPost.trim(), selectedTopic);
+      setNewPost("");
+      await loadFeed(true);
+    } catch {
+      setFeedError("Your post could not be shared. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitReply(postId: string) {
+    if (!replyText.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await createReply(postId, replyText.trim());
+      setReplyText("");
+      setReplyingTo(null);
+      setExpandedPost(postId);
+      await loadFeed(true);
+    } catch {
+      setFeedError("Your response could not be shared. Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function toggleLike(post: ForumPost) {
+    const currentlyLiked = likedPostIds.has(post.id);
+    setLikedPostIds((current) => {
+      const next = new Set(current);
+      if (currentlyLiked) next.delete(post.id);
+      else next.add(post.id);
+      return next;
+    });
+    setPosts((current) =>
+      current.map((item) =>
+        item.id === post.id
+          ? {
+              ...item,
+              likes: Math.max(0, item.likes + (currentlyLiked ? -1 : 1)),
+            }
+          : item
+      )
+    );
+
+    try {
+      await togglePostLike(post.id, currentlyLiked);
+    } catch {
+      setFeedError("That reaction could not be saved.");
+      await loadFeed(true);
     }
   }
 
@@ -127,11 +141,6 @@ export default function ForumPage() {
           </h1>
         </header>
 
-        <div className="circle-summary">
-          Community preview. Sample conversations and anything you add stay on
-          this browser while moderated community access is being prepared.
-        </div>
-
         <section className="circle-timeline">
           <div className="circle-composer">
             <div className="circle-stage-control">
@@ -141,7 +150,7 @@ export default function ForumPage() {
                 type="button"
                 aria-expanded={stagePickerOpen}
               >
-                <span>{myStage}</span>
+                <span>{selectedTopic || "Choose a topic"}</span>
                 <ChevronDown
                   size={14}
                   className={stagePickerOpen ? "is-open" : ""}
@@ -150,19 +159,18 @@ export default function ForumPage() {
 
               {stagePickerOpen && (
                 <div className="circle-stage-picker">
-                  {CARE_STAGES.map((stage) => (
+                  {topics.map((topic) => (
                     <button
-                      key={stage}
+                      key={topic}
                       onClick={() => {
-                        saveMyStage(stage);
-                        setMyStage(stage);
+                        setSelectedTopic(topic);
                         setStagePickerOpen(false);
                       }}
-                      className={myStage === stage ? "is-selected" : ""}
+                      className={selectedTopic === topic ? "is-selected" : ""}
                       type="button"
                     >
-                      <span>{stage}</span>
-                      {myStage === stage && <Check size={13} />}
+                      <span>{topic}</span>
+                      {selectedTopic === topic && <Check size={13} />}
                     </button>
                   ))}
                 </div>
@@ -183,24 +191,52 @@ export default function ForumPage() {
             <div className="mt-3 flex justify-end">
               <button
                 onClick={submitPost}
-                disabled={!newPost.trim()}
+                disabled={!newPost.trim() || !selectedTopic || submitting}
                 className="circle-share-button"
                 type="button"
               >
-                Add to preview
+                {submitting ? "Posting" : "Post anonymously"}
               </button>
             </div>
           </div>
 
+          {feedError && (
+            <div className="circle-feed-message" role="status">
+              <span>{feedError}</span>
+              <button type="button" onClick={() => void loadFeed()}>
+                Try again
+              </button>
+            </div>
+          )}
+
           <div className="circle-feed ip-connected-list">
+            {loading && (
+              <div className="circle-feed-loading" aria-label="Loading the Circle">
+                <span />
+                <span />
+                <span />
+              </div>
+            )}
+
+            {!loading && !posts.length && (
+              <div className="circle-empty">
+                <h2>Start the conversation</h2>
+                <p>Share a question, a hard moment, or something that helped.</p>
+              </div>
+            )}
+
             {posts.map((post) => {
               const isExpanded = expandedPost === post.id;
+              const isLiked = likedPostIds.has(post.id);
 
               return (
                 <article key={post.id} className="circle-post">
                   <div className="circle-post-meta">
-                    <span>{post.careStage}</span>
-                    <span>{formatTimeAgo(post.timestamp)}</span>
+                    <div>
+                      <span>{post.authorTag}</span>
+                      <span>{post.careStage}</span>
+                    </div>
+                    <time>{formatTimeAgo(post.timestamp)}</time>
                   </div>
 
                   <p className="circle-post-copy">{post.content}</p>
@@ -218,9 +254,14 @@ export default function ForumPage() {
                       <MessageCircle size={16} />
                       <span>{post.replies.length}</span>
                     </button>
-                    <button type="button" aria-label="Like post">
-                      <Heart size={16} />
-                      <span>0</span>
+                    <button
+                      className={isLiked ? "is-liked" : ""}
+                      type="button"
+                      aria-label={isLiked ? "Remove reaction" : "Support post"}
+                      onClick={() => void toggleLike(post)}
+                    >
+                      <Heart size={16} fill={isLiked ? "currentColor" : "none"} />
+                      <span>{post.likes}</span>
                     </button>
                     <button
                       onClick={() => {
@@ -240,21 +281,13 @@ export default function ForumPage() {
                           key={reply.id}
                           className={reply.isAI ? "is-support" : ""}
                         >
-                          <span>{formatTimeAgo(reply.timestamp)}</span>
+                          <div className="circle-reply-meta">
+                            <span>{reply.authorTag}</span>
+                            <time>{formatTimeAgo(reply.timestamp)}</time>
+                          </div>
                           <p>{reply.content}</p>
                         </div>
                       ))}
-
-                      {aiLoading === post.id && (
-                        <div
-                          className="circle-reply-loading"
-                          aria-label="Preparing support response"
-                        >
-                          <span />
-                          <span />
-                          <span />
-                        </div>
-                      )}
 
                       {replyingTo === post.id && (
                         <div className="circle-reply-composer">
@@ -278,11 +311,11 @@ export default function ForumPage() {
                             </button>
                             <button
                               onClick={() => submitReply(post.id)}
-                              disabled={!replyText.trim()}
+                              disabled={!replyText.trim() || submitting}
                               className="circle-share-button"
                               type="button"
                             >
-                              Post response
+                              {submitting ? "Posting" : "Post response"}
                             </button>
                           </div>
                         </div>

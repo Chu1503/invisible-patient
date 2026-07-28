@@ -1554,17 +1554,6 @@ select:focus-visible {
   color: var(--ip-paper);
 }
 
-.circle-summary {
-  margin-bottom: 14px;
-  border-radius: 18px;
-  background: var(--ip-yellow);
-  padding: 15px 18px;
-  color: var(--ip-ink);
-  font-size: 13px;
-  font-weight: 520;
-  line-height: 1.55;
-}
-
 .circle-timeline {
   color: var(--ip-ink);
 }
@@ -1576,6 +1565,11 @@ select:focus-visible {
   background: var(--ip-ink);
   padding: 20px;
   color: var(--ip-paper);
+  transition: border-color 150ms ease;
+}
+
+.circle-composer:focus-within {
+  border-color: rgba(249, 250, 247, 0.28);
 }
 
 .circle-stage-control {
@@ -1669,6 +1663,11 @@ select:focus-visible {
   color: rgba(249, 250, 247, 0.48);
 }
 
+.circle-textarea:focus-visible,
+.circle-reply-composer textarea:focus-visible {
+  outline: 0;
+}
+
 .circle-share-button {
   min-height: 38px;
   border: 1px solid var(--ip-yellow);
@@ -1695,6 +1694,70 @@ select:focus-visible {
   margin-top: 28px;
 }
 
+.circle-feed-message {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 14px;
+  border: 1px solid rgba(139, 90, 90, 0.28);
+  border-radius: 14px;
+  background: rgba(139, 90, 90, 0.09);
+  padding: 10px 13px;
+  color: var(--ip-muted);
+  font-size: 11px;
+}
+
+.circle-feed-message button {
+  flex: none;
+  color: var(--ip-ink);
+  font-weight: 680;
+}
+
+.circle-feed-loading {
+  display: flex;
+  min-height: 120px;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.circle-feed-loading span {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--ip-yellow-ink);
+  animation: dataGatePulse 900ms ease-in-out infinite;
+}
+
+.circle-feed-loading span:nth-child(2) {
+  animation-delay: 120ms;
+}
+
+.circle-feed-loading span:nth-child(3) {
+  animation-delay: 240ms;
+}
+
+.circle-empty {
+  border: 1px solid rgba(0, 29, 33, 0.12);
+  border-radius: 20px;
+  padding: 30px 20px;
+  text-align: center;
+}
+
+.circle-empty h2 {
+  color: var(--ip-ink);
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.circle-empty p {
+  margin-top: 6px;
+  color: var(--ip-muted);
+  font-size: 12px;
+}
+
 .circle-post {
   border: 1px solid rgba(249, 250, 247, 0.14);
   border-radius: 22px;
@@ -1716,8 +1779,27 @@ select:focus-visible {
   font-size: 10px;
 }
 
-.circle-post-meta span:first-child {
+.circle-post-meta > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+
+.circle-post-meta > div span:first-child {
+  flex: none;
   color: var(--ip-yellow);
+  font-weight: 630;
+}
+
+.circle-post-meta > div span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.circle-post-meta time {
+  flex: none;
 }
 
 .circle-post-copy {
@@ -1747,6 +1829,10 @@ select:focus-visible {
   color: var(--ip-yellow);
 }
 
+.circle-actions button.is-liked {
+  color: var(--ip-yellow);
+}
+
 .circle-replies {
   margin: 15px -20px -15px;
   border-top: 1px solid rgba(249, 250, 247, 0.12);
@@ -1762,9 +1848,22 @@ select:focus-visible {
   border-bottom: 0;
 }
 
-.circle-replies > div > span {
+.circle-reply-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.circle-reply-meta span,
+.circle-reply-meta time {
   color: var(--ip-muted-on-dark);
   font-size: 10px;
+}
+
+.circle-reply-meta span {
+  color: var(--ip-yellow);
+  font-weight: 620;
 }
 
 .circle-replies > div > p {
@@ -2785,11 +2884,6 @@ select:focus-visible {
   .task-reminder-toast {
     right: 14px;
     bottom: calc(88px + env(safe-area-inset-bottom));
-  }
-
-  .circle-summary {
-    border-radius: 16px;
-    padding: 14px 15px;
   }
 
   .circle-timeline {

@@ -21,12 +21,16 @@ Do not copy the secret or service-role key into this project or Vercel.
 3. Run it once.
 4. Then copy and run
    `supabase/migrations/202607280001_care_task_reminders.sql`.
+5. Then copy and run
+   `supabase/migrations/202607280002_shared_circle.sql`.
 
 The migration creates account-owned tables for profiles, care recipients,
 check-ins and chat messages, care events, action plans, tasks, and follow-ups.
 Every table has RLS policies that compare `auth.uid()` with the row owner.
 The second migration adds recurring care-task schedules, reminder timing, and
-completion timestamps. It is safe to run once after the initial migration.
+completion timestamps. The third adds shared Circle posts, responses, reactions,
+and secure account ownership policies. Each migration is safe to run once in
+the listed order.
 
 ## 3. Configure Google-only authentication
 
@@ -109,6 +113,8 @@ than a broad wildcard when possible.
 9. Add a one-time and a recurring care task, mark each complete, reload, and
    confirm the one-time task stays completed while the recurring task advances
    to its next due date.
+10. Create a Circle post from one account, then sign in with another account
+    and confirm the post, response, and reaction are shared.
 
 ## Security boundary
 

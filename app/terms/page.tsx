@@ -55,6 +55,7 @@ const sections = [
     paragraphs: [
       "You retain ownership of information you submit.",
       "By using the service, you grant Invisible Patient permission to store and process your information solely for the purpose of operating the application.",
+      "Content shared in the Circle is visible to other signed in users under a generated alias. Do not include names, contact details, or other information that could identify you or another person.",
     ],
   },
   {

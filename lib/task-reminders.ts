@@ -76,6 +76,6 @@ export async function showTaskSystemReminder(task: CareTask): Promise<void> {
       data: { url: "/tasks" },
     });
   } catch {
-    // In-app reminders remain available if the browser blocks system alerts.
+    // The task prompt remains available if the browser blocks system alerts.
   }
 }

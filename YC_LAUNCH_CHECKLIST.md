@@ -13,10 +13,9 @@ happen before the YC submission and what can wait until an external pilot.
 - [x] Preserved the existing Supabase cookie session and account-level database
   isolation.
 - [x] Kept first-time users on the setup flow while returning users go Home.
-- [x] Marked Circle as a local community preview instead of implying that its
-  sample posts are live caregiver activity.
-- [x] Changed task reminder language to say **in-app reminder** and clarified
-  that reminders appear while the application is open.
+- [x] Replaced the local Circle preview with shared Supabase posts, responses,
+  and reactions for authenticated users.
+- [x] Kept reminder language concise in the task interface.
 - [x] Corrected README claims about accounts, cloud storage, Circle and
   reminders.
 - [x] Added stricter AI and workflow request-size limits.
@@ -72,23 +71,21 @@ Vercel URL if Google OAuth is configured for that URL.
 
 ## Product truthfulness
 
-- [x] Circle now identifies itself as a community preview.
+- [x] Circle posts and responses now persist in Supabase and are shared across
+  authenticated accounts.
 - [x] The false hard-coded claim about 34 active caregivers has been removed.
-- [x] Posts added in Circle are described as staying in the current browser.
-- [x] Task reminders are described as in-app reminders.
+- [x] Circle uses stable generated aliases instead of caregiver names.
 - [x] The README no longer claims that the app requires no account.
-- [x] The README no longer describes Circle as a live anonymous community.
+- [x] The README accurately describes the shared Circle feature.
 
-Before showing Circle in a live pitch, decide whether to:
+Before opening Circle beyond controlled demo accounts:
 
-- [ ] Keep the preview label and describe moderation as the next milestone; or
-- [ ] Hide Circle from the main navigation until a real moderated backend is
-  ready.
+- [ ] Add reporting, moderation, blocking, and administrator removal tools.
 
 Do not claim:
 
 - That seeded Insights represent real customer history.
-- That Circle contains real active caregivers.
+- That demo Circle posts come from real caregivers.
 - That task reminders work while the browser is closed.
 - That the product is end-to-end encrypted.
 - That the product is HIPAA compliant.
@@ -141,8 +138,8 @@ the demo account is tested beforehand.
 
 - [ ] Implement real Web Push, email or mobile reminders that work while the app
   is closed.
-- [ ] Build the Circle backend, reporting, moderation, blocking and crisis
-  escalation processes before allowing real community posts.
+- [ ] Add Circle reporting, moderation, blocking and crisis escalation
+  processes before inviting real community members.
 - [ ] Add previous-conversation viewing and deletion controls.
 - [ ] Add genuinely ZIP-aware caregiver resources or describe them only as
   national resource locators.

@@ -30,13 +30,11 @@ If a user expresses crisis language or suicidal thoughts, the app immediately su
 Users can speak instead of typing. Speech recognition captures the user input, and the AI can respond with spoken output for a more accessible and natural experience.
 
 ### 6. Anonymous peer support forum
-The current Circle experience is a local product preview with sample
-conversations. Posts added there stay in the current browser; it is not yet a
-live shared community.
+Circle is a shared anonymous caregiver feed backed by Supabase. Signed in users
+can post, respond, and react using generated aliases.
 
 ### 7. Care tasks
-Caregivers can create one-time or recurring care tasks and receive in-app
-reminders while the application is open.
+Caregivers can create one-time or recurring care tasks and schedule reminders.
 
 ## Key features
 
@@ -47,8 +45,8 @@ reminders while the application is open.
 - Voice and text interaction modes
 - Google account authentication
 - Account-isolated cloud storage with database Row Level Security
-- Local preview of the planned caregiver community
-- One-time and recurring care tasks with in-app reminders
+- Shared anonymous caregiver posts, responses, and reactions
+- One-time and recurring care tasks with scheduled reminders
 
 ## How it works
 
