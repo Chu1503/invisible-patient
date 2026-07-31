@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import PwaInstallPrompt from "@/components/PwaInstallPrompt";
+import AccountDataGate from "@/components/AccountDataGate";
+import RouteScrollReset from "@/components/RouteScrollReset";
+import TaskReminderManager from "@/components/TaskReminderManager";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -41,7 +44,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className="min-h-screen bg-[#F9FAF7]">
-        {children}
+        <RouteScrollReset />
+        <AccountDataGate>
+          <TaskReminderManager />
+          {children}
+        </AccountDataGate>
         <PwaInstallPrompt />
       </body>
     </html>

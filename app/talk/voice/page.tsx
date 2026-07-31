@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { Mic, MicOff, X, Volume2 } from "lucide-react";
 import { analyzeConversation } from "@/lib/analysis";
 import { readApiError, requestChat } from "@/lib/chat-client";
-import { buildCareWorkflow } from "@/lib/care-workflows";
 import { INPUT_LIMITS, sanitizePlainText } from "@/lib/input";
 import {
   saveCheckin,
@@ -22,6 +21,8 @@ import {
   type CareRecipient,
   type CaregiverProfile,
 } from "@/lib/care";
+import { buildCareWorkflow } from "@/lib/care-workflows";
+import { logDevelopmentTiming, perfStart } from "@/lib/performance";
 
 const ZBI_LABELS = ["Never", "Rarely", "Sometimes", "Frequently", "Nearly Always"];
 
@@ -327,7 +328,6 @@ export default function VoicePage() {
 
     return () => clearTimeout(timer);
   }, [mounted, voiceSupported, greetingSpoken, initialMessage.content, speak]);
-
   async function handleFinalTranscript(text: string) {
     const cleanedText = sanitizePlainText(text, INPUT_LIMITS.chatMessageChars);
     if (!cleanedText) return;
@@ -391,6 +391,7 @@ export default function VoicePage() {
     });
 
     let workflow: ReturnType<typeof buildCareWorkflow> = null;
+    const workflowStartedAt = perfStart();
     try {
       workflow = buildCareWorkflow({
         message: cleanedText,
@@ -405,14 +406,16 @@ export default function VoicePage() {
     } catch {
       workflow = null;
     }
+    logDevelopmentTiming("voice.workflow", workflowStartedAt);
 
+    const chatStartedAt = perfStart();
     const res = await requestChat({
-        messages: newMessages.slice(-INPUT_LIMITS.chatMessages).map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-        context: {
-          zbiAnswers: updatedZbiAnswers,
+      messages: newMessages.slice(-INPUT_LIMITS.chatMessages).map((m) => ({
+        role: m.role,
+        content: m.content,
+      })),
+      context: {
+        zbiAnswers: updatedZbiAnswers,
           riskLevel: analysis.riskLevel,
           dominantThemes: analysis.dominantThemes,
           caregiver,
@@ -435,14 +438,19 @@ export default function VoicePage() {
       );
       return;
     }
-
+    logDevelopmentTiming("voice.chat-response", chatStartedAt);
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let full = "";
+    let receivedFirstChunk = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (!receivedFirstChunk) {
+        receivedFirstChunk = true;
+        logDevelopmentTiming("voice.first-token", chatStartedAt);
+      }
 
       full += decoder.decode(value, { stream: true });
 
@@ -454,6 +462,7 @@ export default function VoicePage() {
     }
 
     const { clean, qIndex } = parseZbiTag(full);
+    logDevelopmentTiming("voice.stream-complete", chatStartedAt);
 
     if (qIndex !== null && qIndex === updatedZbiAnswers.length) {
       setPendingZbiQ(qIndex);

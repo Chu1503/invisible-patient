@@ -1,3 +1,6 @@
+import { isSupabaseConfigured } from "./supabase/config";
+import { createClient } from "./supabase/client";
+
 const CHAT_RESPONSE_TIMEOUT_MS = 30_000;
 
 export async function requestChat(payload: unknown): Promise<Response> {
@@ -10,9 +13,19 @@ export async function requestChat(payload: unknown): Promise<Response> {
   );
 
   try {
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+    };
+    if (apiBase && isSupabaseConfigured()) {
+      const { data } = await createClient().auth.getSession();
+      if (data.session?.access_token) {
+        headers.Authorization = `Bearer ${data.session.access_token}`;
+      }
+    }
+
     return await fetch(`${apiBase}/api/chat`, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(payload),
       credentials: apiBase ? "omit" : "same-origin",
       signal: controller.signal,

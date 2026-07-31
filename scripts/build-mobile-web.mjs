@@ -39,7 +39,10 @@ for (const directory of ["app", "components", "hooks", "lib", "public"]) {
   await cp(source, destination, {
     recursive: true,
     filter(sourcePath) {
-      return !sourcePath.startsWith(path.join(root, "app", "api"));
+      return ![
+        path.join(root, "app", "api"),
+        path.join(root, "app", "auth"),
+      ].some((excludedPath) => sourcePath.startsWith(excludedPath));
     },
   });
 }

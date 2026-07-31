@@ -5,7 +5,6 @@ import { Send, Mic } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { analyzeConversation } from "@/lib/analysis";
 import { readApiError, requestChat } from "@/lib/chat-client";
-import { buildCareWorkflow } from "@/lib/care-workflows";
 import { INPUT_LIMITS, sanitizePlainText } from "@/lib/input";
 import {
   saveCheckin,
@@ -23,6 +22,8 @@ import {
   type CareRecipient,
   type CaregiverProfile,
 } from "@/lib/care";
+import { buildCareWorkflow } from "@/lib/care-workflows";
+import { logDevelopmentTiming, perfStart } from "@/lib/performance";
 
 function sanitize(text: string): string {
   return text.replace(/\s*[\u2013\u2014]\s*/g, ", ").trim();
@@ -75,6 +76,7 @@ export default function TalkPage() {
   }, []);
 
   useEffect(() => {
+    if (messages.length === 1 && pendingZbiQ < 0) return;
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, pendingZbiQ]);
 
@@ -118,6 +120,7 @@ export default function TalkPage() {
     });
 
     let workflow: ReturnType<typeof buildCareWorkflow> = null;
+    const workflowStartedAt = perfStart();
     try {
       workflow = buildCareWorkflow({
         message: caregiverText,
@@ -132,9 +135,11 @@ export default function TalkPage() {
     } catch {
       workflow = null;
     }
+    logDevelopmentTiming("talk.workflow", workflowStartedAt);
 
+    const chatStartedAt = perfStart();
     const res = await requestChat({
-        messages: newMessages.slice(-INPUT_LIMITS.chatMessages).map((m) => ({
+      messages: newMessages.slice(-INPUT_LIMITS.chatMessages).map((m) => ({
           role: m.role,
           content: m.content,
         })),
@@ -161,14 +166,19 @@ export default function TalkPage() {
       );
       return;
     }
-
+    logDevelopmentTiming("talk.chat-response", chatStartedAt);
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let full = "";
+    let receivedFirstChunk = false;
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
+      if (!receivedFirstChunk) {
+        receivedFirstChunk = true;
+        logDevelopmentTiming("talk.first-token", chatStartedAt);
+      }
 
       full += decoder.decode(value, { stream: true });
 
@@ -180,6 +190,7 @@ export default function TalkPage() {
     }
 
     setLoading(false);
+    logDevelopmentTiming("talk.stream-complete", chatStartedAt);
 
     const { qIndex } = parseZbiTag(full);
 
@@ -206,7 +217,6 @@ export default function TalkPage() {
       riskLevel: analysis.riskLevel,
     });
   }
-
   async function sendMessage() {
     if (!canSend || loading) return;
 

@@ -30,7 +30,11 @@ If a user expresses crisis language or suicidal thoughts, the app immediately su
 Users can speak instead of typing. Speech recognition captures the user input, and the AI can respond with spoken output for a more accessible and natural experience.
 
 ### 6. Anonymous peer support forum
-The app includes a private anonymous community space where caregivers can post, reply, and connect with others at similar caregiving stages.
+Circle is a shared anonymous caregiver feed backed by Supabase. Signed in users
+can post, respond, and react using generated aliases.
+
+### 7. Care tasks
+Caregivers can create one-time or recurring care tasks and schedule reminders.
 
 ## Key features
 
@@ -39,9 +43,10 @@ The app includes a private anonymous community space where caregivers can post, 
 - Crisis signal detection and immediate support resources
 - Emotional trend visualization
 - Voice and text interaction modes
-- Anonymous caregiver forum
-- No account required
-- Fully local data storage for privacy-focused usage
+- Google account authentication
+- Account-isolated cloud storage with database Row Level Security
+- Shared anonymous caregiver posts, responses, and reactions
+- One-time and recurring care tasks with scheduled reminders
 
 ## How it works
 
@@ -64,8 +69,15 @@ When the session ends, the frontend analyzes the conversation to estimate:
 
 The result is saved locally and used to update the dashboard and visualizations.
 
-### Privacy-first architecture
-There is no external database in this version. User data is stored locally in the browser using `localStorage`. The only server-side piece is the API route that securely proxies requests to the Anthropic API.
+### Account-backed privacy architecture
+Supabase Auth provides Google OAuth accounts and cookie-based sessions.
+Caregiver profiles, care-recipient details, check-ins, chat messages, care
+events, action plans, tasks, and follow-ups are stored in Postgres. Row Level
+Security restricts every personal row to its owning account.
+
+The browser keeps a temporary local cache for a responsive interface. Supabase
+is the durable source of truth after sign-in. The Anthropic API remains behind a
+server route and its API key is never sent to the browser.
 
 ## Tech stack
 
@@ -85,10 +97,22 @@ There is no external database in this version. User data is stored locally in th
 ### Styling and utilities
 - clsx
 - tailwind-merge
-- Google Fonts
+- Self-hosted Geist font
 
 ### Storage
-- `localStorage` for check-ins, forum data, and anonymous profile state
+- Supabase Postgres for account-owned caregiver and care-workflow data
+- `localStorage` as a responsive browser cache
+- Local-only forum seed and draft state in the current MVP
+
+## Account setup
+
+See [SUPABASE_SETUP.md](./SUPABASE_SETUP.md) for the database migration,
+authentication callback URLs, local environment variables, Vercel
+configuration, testing checklist, and security boundaries.
+
+See [YC_LAUNCH_CHECKLIST.md](./YC_LAUNCH_CHECKLIST.md) for the current
+submission checklist, product-truthfulness review, security priorities, and
+post-YC engineering work.
 
 ## Architecture overview
 
@@ -115,10 +139,9 @@ timeouts, retries, request limits, and token budget. The default API window is
 15 minutes. `LOGIN_RATE_LIMIT_MAX` is fixed at five by default and should be
 used by the login route when authentication is added.
 
-The current limiter is process-local, which is appropriate for this single
-instance prototype. Before running multiple production instances, back the same
-limits with a shared store such as Redis or platform KV so users cannot receive
-a fresh bucket on another instance.
+The current API limiter is process-local. Before running multiple production
+instances, back the same limits with a shared store such as Redis or platform
+KV so users cannot receive a fresh bucket on another instance.
 
 ## Local validation
 

@@ -41,6 +41,7 @@ export interface ChatContext {
     routines?: string[];
     knownTriggers?: string[];
     approvedInstructions?: string[];
+    careNotes?: string;
   } | null;
   workflow?: {
     issue?: string;
@@ -54,31 +55,32 @@ export interface ChatContext {
 export function buildSystemPrompt(context?: ChatContext): string {
   const answeredCount = context?.zbiAnswers?.length ?? 0;
   const nextQuestion = answeredCount < 12 ? ZBI_QUESTIONS[answeredCount] : null;
-
-  const crisisInstruction = context?.riskLevel === "crisis" ? `
-CRISIS DETECTED: The person has expressed thoughts of suicide or harm. 
+  const crisisInstruction =
+    context?.riskLevel === "crisis"
+      ? `
+CRISIS DETECTED: The person has expressed thoughts of suicide or harm.
 Your response MUST begin with warm acknowledgment, then include this block verbatim:
 
 ${CRISIS_RESPONSE}
 
-Then continue with compassionate support. Do not skip the crisis resources.` : "";
-
-  const questionInstruction = nextQuestion ? `
+Then continue with compassionate support. Do not skip the crisis resources.`
+      : "";
+  const questionInstruction = nextQuestion
+    ? `
 After your reflection and support, naturally weave in this check in question. Rephrase it warmly so it flows from what they shared. Then on a new line write exactly: [ZBI_Q${answeredCount + 1}]
 
 Question to weave in: "${nextQuestion}"
 
 Keep the full response under 70 words. Use no more than four short sentences.
-${12 - answeredCount} questions remaining.` : `
+${12 - answeredCount} questions remaining.`
+    : `
 All 12 questions answered. Continue the same reflective, supportive style. Stay under 55 words and use no more than three short sentences.`;
-
   const responsePreference =
     context?.caregiver?.communicationPreference === "direct"
       ? "The caregiver prefers direct, practical support while still feeling heard."
       : context?.caregiver?.communicationPreference === "gentle"
         ? "The caregiver prefers gentle listening before any practical suggestion."
         : "Balance emotional listening with one practical next step.";
-
   const immediateActions = context?.workflow?.immediateActions?.slice(0, 3) ?? [];
 
   return `You are a warm, non-judgmental caregiver-support coach inside The Invisible Patient.
@@ -119,6 +121,7 @@ Selected care recipient:
 - Routines: ${context?.recipient?.routines?.join(", ") || "none recorded"}
 - Known triggers: ${context?.recipient?.knownTriggers?.join(", ") || "none recorded"}
 - Approved instructions: ${context?.recipient?.approvedInstructions?.join(", ") || "none recorded"}
+- Care notes: ${context?.recipient?.careNotes || "none recorded"}
 
 Care workflow already prepared:
 - Issue: ${context?.workflow?.issue || "general"}

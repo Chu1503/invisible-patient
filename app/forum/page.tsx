@@ -1,20 +1,30 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Check, ChevronDown, Heart, MessageCircle } from "lucide-react";
-import Navbar from "@/components/Navbar";
-import { readApiError, requestChat } from "@/lib/chat-client";
-import { INPUT_LIMITS, sanitizePlainText } from "@/lib/input";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  CARE_STAGES,
+  Check,
+  ChevronDown,
+  Heart,
+  MessageCircle,
+  Pencil,
+  Save,
+  Trash2,
+  X,
+} from "lucide-react";
+import Navbar from "@/components/Navbar";
+import { INPUT_LIMITS } from "@/lib/input";
+import {
   createPost,
   createReply,
+  deleteForumPost,
+  deleteForumReply,
   detectCrisis,
   formatTimeAgo,
-  getMyStage,
-  getPosts,
-  saveMyStage,
-  savePosts,
+  getCircleTopics,
+  getForumFeed,
+  togglePostLike,
+  updateForumPost,
+  updateForumReply,
   type ForumPost,
 } from "@/lib/forum";
 
@@ -33,95 +43,437 @@ const CRISIS_RESOURCES = (
   </div>
 );
 
+type EditingItem = {
+  kind: "post" | "reply";
+  id: string;
+};
+
 export default function ForumPage() {
+  const initialTopics = useMemo(() => getCircleTopics(), []);
   const [posts, setPosts] = useState<ForumPost[]>([]);
-  const [myStage, setMyStage] = useState(CARE_STAGES[0]);
+  const [topics] = useState<string[]>(initialTopics);
+  const [selectedTopic, setSelectedTopic] = useState(initialTopics[0] ?? "");
+  const [likedPostIds, setLikedPostIds] = useState<Set<string>>(new Set());
   const [newPost, setNewPost] = useState("");
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
   const [expandedPost, setExpandedPost] = useState<string | null>(null);
   const [stagePickerOpen, setStagePickerOpen] = useState(false);
-  const [aiLoading, setAiLoading] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [submitting, setSubmitting] = useState(false);
+  const [feedError, setFeedError] = useState("");
+  const [editingItem, setEditingItem] = useState<EditingItem | null>(null);
+  const [editText, setEditText] = useState("");
+  const [workingItem, setWorkingItem] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<EditingItem | null>(null);
+  const [currentUserTag, setCurrentUserTag] = useState("");
+  const mutationCount = useRef(0);
+  const mutationVersion = useRef(0);
+  const pendingLikes = useRef(new Set<string>());
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setPosts(getPosts());
-      setMyStage(getMyStage());
-    }, 0);
-    return () => window.clearTimeout(timer);
+  const loadFeed = useCallback(async (silent = false) => {
+    const requestedAtVersion = mutationVersion.current;
+    if (!silent) setLoading(true);
+    try {
+      const feed = await getForumFeed();
+      if (requestedAtVersion !== mutationVersion.current) return;
+      setPosts(feed.posts);
+      setLikedPostIds(feed.likedPostIds);
+      setCurrentUserTag(feed.currentUserTag);
+      setFeedError("");
+    } catch {
+      setFeedError("The Circle could not refresh. Please try again.");
+    } finally {
+      if (!silent) setLoading(false);
+    }
   }, []);
 
-  function submitPost() {
-    const content = sanitizePlainText(newPost, INPUT_LIMITS.forumPostChars);
-    if (!content) return;
-    const post = createPost(content, myStage);
-    const updated = [post, ...posts];
-    setPosts(updated);
-    savePosts(updated);
+  useEffect(() => {
+    const initialLoad = window.setTimeout(() => void loadFeed(), 0);
+    const interval = window.setInterval(() => {
+      if (
+        document.visibilityState === "visible" &&
+        mutationCount.current === 0
+      ) {
+        void loadFeed(true);
+      }
+    }, 30_000);
+    const refreshOnFocus = () => {
+      if (mutationCount.current === 0) void loadFeed(true);
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    return () => {
+      window.clearTimeout(initialLoad);
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refreshOnFocus);
+    };
+  }, [loadFeed]);
+
+  useEffect(() => {
+    if (!deleteTarget) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !workingItem) setDeleteTarget(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [deleteTarget, workingItem]);
+
+  async function submitPost() {
+    if (!newPost.trim() || !selectedTopic || submitting) return;
+    const content = newPost.trim();
+    const temporaryId = `pending-post-${Date.now()}`;
+    const pendingPost: ForumPost = {
+      id: temporaryId,
+      content,
+      timestamp: Date.now(),
+      authorTag: currentUserTag || "Posting anonymously",
+      careStage: selectedTopic,
+      replies: [],
+      hasCrisis: detectCrisis(content),
+      likes: 0,
+      isOwned: true,
+      isPending: true,
+    };
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
+    setSubmitting(true);
     setNewPost("");
-    setExpandedPost(post.id);
-    if (post.hasCrisis) {
-      getAIReply(post.id, post.content, updated);
-    }
-  }
-
-  function submitReply(postId: string) {
-    const submittedText = sanitizePlainText(
-      replyText,
-      INPUT_LIMITS.forumReplyChars
-    );
-    if (!submittedText) return;
-    const reply = createReply(submittedText);
-    const updated = posts.map((post) =>
-      post.id === postId
-        ? { ...post, replies: [...post.replies, reply] }
-        : post
-    );
-    setPosts(updated);
-    savePosts(updated);
-    setReplyText("");
-    setReplyingTo(null);
-    if (detectCrisis(submittedText)) {
-      getAIReply(postId, submittedText, updated);
-    }
-  }
-
-  async function getAIReply(
-    postId: string,
-    triggerText: string,
-    currentPosts: ForumPost[]
-  ) {
-    setAiLoading(postId);
+    setPosts((current) => [pendingPost, ...current]);
     try {
-      const response = await requestChat({
-          messages: [{ role: "user", content: triggerText }],
-          context: { riskLevel: "crisis", zbiAnswers: [], dominantThemes: [] },
-      });
-      if (!response.ok || !response.body) {
-        throw new Error(
-          await readApiError(response, "The support reply could not be loaded.")
-        );
-      }
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let full = "";
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        full += decoder.decode(value);
-      }
-      const aiReply = createReply(full.trim(), true);
-      const updated = currentPosts.map((post) =>
-        post.id === postId
-          ? { ...post, replies: [...post.replies, aiReply] }
-          : post
+      const created = await createPost(
+        content,
+        selectedTopic,
+        currentUserTag || undefined
       );
-      setPosts(updated);
-      savePosts(updated);
+      setPosts((current) => {
+        if (current.some((post) => post.id === temporaryId)) {
+          return current.map((post) =>
+            post.id === temporaryId ? created : post
+          );
+        }
+        return current.some((post) => post.id === created.id)
+          ? current
+          : [created, ...current];
+      });
+      setFeedError("");
     } catch {
-      // The caregiver's optimistic post or reply remains available locally.
+      setPosts((current) =>
+        current.filter((post) => post.id !== temporaryId)
+      );
+      setNewPost((current) => current || content);
+      setFeedError("Your post could not be shared. Please try again.");
     } finally {
-      setAiLoading(null);
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
+      setSubmitting(false);
+    }
+  }
+
+  async function submitReply(postId: string) {
+    if (!replyText.trim() || submitting) return;
+    const content = replyText.trim();
+    const temporaryId = `pending-reply-${Date.now()}`;
+    const pendingReply = {
+      id: temporaryId,
+      content,
+      timestamp: Date.now(),
+      authorTag: currentUserTag || "Posting anonymously",
+      isAI: false,
+      isOwned: true,
+      isPending: true,
+    };
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
+    setSubmitting(true);
+    setReplyText("");
+    setPosts((current) =>
+      current.map((post) =>
+        post.id === postId
+          ? { ...post, replies: [...post.replies, pendingReply] }
+          : post
+      )
+    );
+    try {
+      const created = await createReply(
+        postId,
+        content,
+        currentUserTag || undefined
+      );
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                replies: post.replies.some(
+                  (reply) => reply.id === temporaryId
+                )
+                  ? post.replies.map((reply) =>
+                      reply.id === temporaryId ? created : reply
+                    )
+                  : post.replies.some((reply) => reply.id === created.id)
+                    ? post.replies
+                    : [...post.replies, created],
+              }
+            : post
+        )
+      );
+      setReplyingTo(null);
+      setExpandedPost(postId);
+      setFeedError("");
+    } catch {
+      setPosts((current) =>
+        current.map((post) =>
+          post.id === postId
+            ? {
+                ...post,
+                replies: post.replies.filter(
+                  (reply) => reply.id !== temporaryId
+                ),
+              }
+            : post
+        )
+      );
+      setReplyText((current) => current || content);
+      setFeedError("Your response could not be shared. Please try again.");
+    } finally {
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
+      setSubmitting(false);
+    }
+  }
+
+  async function toggleLike(post: ForumPost) {
+    if (pendingLikes.current.has(post.id)) return;
+    pendingLikes.current.add(post.id);
+    const currentlyLiked = likedPostIds.has(post.id);
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
+    setLikedPostIds((current) => {
+      const next = new Set(current);
+      if (currentlyLiked) next.delete(post.id);
+      else next.add(post.id);
+      return next;
+    });
+    setPosts((current) =>
+      current.map((item) =>
+        item.id === post.id
+          ? {
+              ...item,
+              likes: Math.max(0, item.likes + (currentlyLiked ? -1 : 1)),
+            }
+          : item
+      )
+    );
+
+    try {
+      await togglePostLike(post.id, currentlyLiked);
+    } catch {
+      setLikedPostIds((current) => {
+        const next = new Set(current);
+        if (currentlyLiked) next.add(post.id);
+        else next.delete(post.id);
+        return next;
+      });
+      setPosts((current) =>
+        current.map((item) =>
+          item.id === post.id
+            ? {
+                ...item,
+                likes: Math.max(
+                  0,
+                  item.likes + (currentlyLiked ? 1 : -1)
+                ),
+              }
+            : item
+        )
+      );
+      setFeedError("That reaction could not be saved.");
+    } finally {
+      pendingLikes.current.delete(post.id);
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
+    }
+  }
+
+  function beginEditing(
+    kind: EditingItem["kind"],
+    id: string,
+    content: string
+  ) {
+    setEditingItem({ kind, id });
+    setEditText(content);
+    setReplyingTo(null);
+    setFeedError("");
+  }
+
+  async function saveEdit() {
+    if (!editingItem || !editText.trim() || workingItem) return;
+    const key = `edit-${editingItem.kind}-${editingItem.id}`;
+    const editing = editingItem;
+    const updatedContent = editText.trim();
+    const originalPost =
+      editing.kind === "post"
+        ? posts.find((post) => post.id === editing.id)
+        : undefined;
+    const originalReply =
+      editing.kind === "reply"
+        ? posts
+            .flatMap((post) => post.replies)
+            .find((reply) => reply.id === editing.id)
+        : undefined;
+    const editedAt = Date.now();
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
+    setWorkingItem(key);
+    setPosts((current) =>
+      current.map((post) => {
+        if (editing.kind === "post" && post.id === editing.id) {
+          return {
+            ...post,
+            content: updatedContent,
+            hasCrisis: detectCrisis(updatedContent),
+            editedAt,
+          };
+        }
+        if (editing.kind === "reply") {
+          return {
+            ...post,
+            replies: post.replies.map((reply) =>
+              reply.id === editing.id
+                ? { ...reply, content: updatedContent, editedAt }
+                : reply
+            ),
+          };
+        }
+        return post;
+      })
+    );
+    setEditingItem(null);
+    try {
+      if (editing.kind === "post") {
+        await updateForumPost(editing.id, updatedContent);
+      } else {
+        await updateForumReply(editing.id, updatedContent);
+      }
+      setEditText("");
+      setFeedError("");
+    } catch {
+      setPosts((current) =>
+        current.map((post) => {
+          if (originalPost && post.id === originalPost.id) {
+            return originalPost;
+          }
+          if (originalReply) {
+            return {
+              ...post,
+              replies: post.replies.map((reply) =>
+                reply.id === originalReply.id ? originalReply : reply
+              ),
+            };
+          }
+          return post;
+        })
+      );
+      setEditingItem(editing);
+      setFeedError("Your changes could not be saved. Please try again.");
+    } finally {
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
+      setWorkingItem("");
+    }
+  }
+
+  async function confirmDelete() {
+    if (!deleteTarget || workingItem) return;
+    const { kind, id } = deleteTarget;
+    const deletedPostIndex = posts.findIndex((post) => post.id === id);
+    const deletedPost =
+      kind === "post" && deletedPostIndex >= 0
+        ? posts[deletedPostIndex]
+        : undefined;
+    const replyParent = posts.find((post) =>
+      post.replies.some((reply) => reply.id === id)
+    );
+    const deletedReplyIndex =
+      replyParent?.replies.findIndex((reply) => reply.id === id) ?? -1;
+    const deletedReply =
+      kind === "reply" && deletedReplyIndex >= 0
+        ? replyParent?.replies[deletedReplyIndex]
+        : undefined;
+    const wasLiked = likedPostIds.has(id);
+    const wasExpanded = expandedPost === id;
+    const key = `delete-${kind}-${id}`;
+    mutationVersion.current += 1;
+    mutationCount.current += 1;
+    setWorkingItem(key);
+    if (kind === "post") {
+      setPosts((current) => current.filter((post) => post.id !== id));
+      setLikedPostIds((current) => {
+        const next = new Set(current);
+        next.delete(id);
+        return next;
+      });
+      if (expandedPost === id) setExpandedPost(null);
+    } else {
+      setPosts((current) =>
+        current.map((post) => ({
+          ...post,
+          replies: post.replies.filter((reply) => reply.id !== id),
+        }))
+      );
+    }
+    setDeleteTarget(null);
+    try {
+      if (kind === "post") {
+        await deleteForumPost(id);
+      } else {
+        await deleteForumReply(id);
+      }
+      if (editingItem?.id === id) {
+        setEditingItem(null);
+        setEditText("");
+      }
+      setFeedError("");
+    } catch {
+      setPosts((current) => {
+        if (deletedPost && !current.some((post) => post.id === id)) {
+          const next = [...current];
+          next.splice(Math.min(deletedPostIndex, next.length), 0, deletedPost);
+          return next;
+        }
+        if (replyParent && deletedReply) {
+          return current.map((post) => {
+            if (
+              post.id !== replyParent.id ||
+              post.replies.some((reply) => reply.id === id)
+            ) {
+              return post;
+            }
+            const replies = [...post.replies];
+            replies.splice(
+              Math.min(deletedReplyIndex, replies.length),
+              0,
+              deletedReply
+            );
+            return { ...post, replies };
+          });
+        }
+        return current;
+      });
+      if (wasLiked) {
+        setLikedPostIds((current) => new Set(current).add(id));
+      }
+      if (wasExpanded) setExpandedPost(id);
+      setDeleteTarget({ kind, id });
+      setFeedError(
+        kind === "post"
+          ? "This post could not be deleted."
+          : "This response could not be deleted."
+      );
+    } finally {
+      mutationCount.current = Math.max(0, mutationCount.current - 1);
+      setWorkingItem("");
     }
   }
 
@@ -138,11 +490,6 @@ export default function ForumPage() {
           </h1>
         </header>
 
-        <div className="circle-summary">
-          34 caregivers shared that nighttime restlessness got harder. You are
-          not alone in those 3am moments.
-        </div>
-
         <section className="circle-timeline">
           <div className="circle-composer">
             <div className="circle-stage-control">
@@ -152,7 +499,7 @@ export default function ForumPage() {
                 type="button"
                 aria-expanded={stagePickerOpen}
               >
-                <span>{myStage}</span>
+                <span>{selectedTopic || "Choose a topic"}</span>
                 <ChevronDown
                   size={14}
                   className={stagePickerOpen ? "is-open" : ""}
@@ -161,19 +508,18 @@ export default function ForumPage() {
 
               {stagePickerOpen && (
                 <div className="circle-stage-picker">
-                  {CARE_STAGES.map((stage) => (
+                  {topics.map((topic) => (
                     <button
-                      key={stage}
+                      key={topic}
                       onClick={() => {
-                        saveMyStage(stage);
-                        setMyStage(stage);
+                        setSelectedTopic(topic);
                         setStagePickerOpen(false);
                       }}
-                      className={myStage === stage ? "is-selected" : ""}
+                      className={selectedTopic === topic ? "is-selected" : ""}
                       type="button"
                     >
-                      <span>{stage}</span>
-                      {myStage === stage && <Check size={13} />}
+                      <span>{topic}</span>
+                      {selectedTopic === topic && <Check size={13} />}
                     </button>
                   ))}
                 </div>
@@ -194,28 +540,105 @@ export default function ForumPage() {
             <div className="mt-3 flex justify-end">
               <button
                 onClick={submitPost}
-                disabled={!newPost.trim()}
+                disabled={!newPost.trim() || !selectedTopic || submitting}
                 className="circle-share-button"
                 type="button"
               >
-                Share with the circle
+                {submitting ? "Posting" : "Post anonymously"}
               </button>
             </div>
           </div>
 
+          {feedError && (
+            <div className="circle-feed-message" role="status">
+              <span>{feedError}</span>
+              <button type="button" onClick={() => void loadFeed()}>
+                Try again
+              </button>
+            </div>
+          )}
+
           <div className="circle-feed ip-connected-list">
+            {loading && (
+              <div className="circle-feed-loading" aria-label="Loading the Circle">
+                <span />
+                <span />
+                <span />
+              </div>
+            )}
+
+            {!loading && !posts.length && (
+              <div className="circle-empty">
+                <h2>Start the conversation</h2>
+                <p>Share a question, a hard moment, or something that helped.</p>
+              </div>
+            )}
+
             {posts.map((post) => {
               const isExpanded = expandedPost === post.id;
+              const isLiked = likedPostIds.has(post.id);
 
               return (
                 <article key={post.id} className="circle-post">
                   <div className="circle-post-meta">
-                    <span>{post.careStage}</span>
-                    <span>{formatTimeAgo(post.timestamp)}</span>
+                    <div className="circle-post-author">
+                      <span>{post.authorTag}</span>
+                      <span>{post.careStage}</span>
+                    </div>
+                    <div className="circle-post-controls">
+                      <div className="circle-time-meta">
+                        <time>
+                          {post.isPending
+                            ? "Posting"
+                            : formatTimeAgo(post.timestamp)}
+                        </time>
+                        {post.editedAt && <span>Edited</span>}
+                      </div>
+                      {post.isOwned && !post.isPending && (
+                        <div className="circle-owner-actions">
+                          <button
+                            type="button"
+                            aria-label="Edit post"
+                            disabled={Boolean(workingItem)}
+                            onClick={() =>
+                              beginEditing("post", post.id, post.content)
+                            }
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Delete post"
+                            disabled={Boolean(workingItem)}
+                            onClick={() =>
+                              setDeleteTarget({ kind: "post", id: post.id })
+                            }
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
-                  <p className="circle-post-copy">{post.content}</p>
-                  {post.hasCrisis && CRISIS_RESOURCES}
+                  {editingItem?.kind === "post" &&
+                  editingItem.id === post.id ? (
+                    <CircleEditComposer
+                      value={editText}
+                      saving={workingItem === `edit-post-${post.id}`}
+                      onChange={setEditText}
+                      onCancel={() => {
+                        setEditingItem(null);
+                        setEditText("");
+                      }}
+                      onSave={() => void saveEdit()}
+                    />
+                  ) : (
+                    <>
+                      <p className="circle-post-copy">{post.content}</p>
+                      {post.hasCrisis && CRISIS_RESOURCES}
+                    </>
+                  )}
 
                   <div className="circle-actions">
                     <button
@@ -224,14 +647,21 @@ export default function ForumPage() {
                         setReplyingTo(null);
                       }}
                       type="button"
+                      disabled={post.isPending}
                       aria-label={isExpanded ? "Hide responses" : "Show responses"}
                     >
                       <MessageCircle size={16} />
                       <span>{post.replies.length}</span>
                     </button>
-                    <button type="button" aria-label="Like post">
-                      <Heart size={16} />
-                      <span>0</span>
+                    <button
+                      className={isLiked ? "is-liked" : ""}
+                      type="button"
+                      aria-label={isLiked ? "Remove reaction" : "Support post"}
+                      disabled={post.isPending}
+                      onClick={() => void toggleLike(post)}
+                    >
+                      <Heart size={16} fill={isLiked ? "currentColor" : "none"} />
+                      <span>{post.likes}</span>
                     </button>
                     <button
                       onClick={() => {
@@ -239,6 +669,7 @@ export default function ForumPage() {
                         setReplyingTo(post.id);
                       }}
                       type="button"
+                      disabled={post.isPending}
                     >
                       Respond
                     </button>
@@ -251,21 +682,70 @@ export default function ForumPage() {
                           key={reply.id}
                           className={reply.isAI ? "is-support" : ""}
                         >
-                          <span>{formatTimeAgo(reply.timestamp)}</span>
-                          <p>{reply.content}</p>
+                          <div className="circle-reply-meta">
+                            <span>{reply.authorTag}</span>
+                            <div className="circle-reply-controls">
+                              <div className="circle-time-meta">
+                                <time>
+                                  {reply.isPending
+                                    ? "Posting"
+                                    : formatTimeAgo(reply.timestamp)}
+                                </time>
+                                {reply.editedAt && <span>Edited</span>}
+                              </div>
+                              {reply.isOwned && !reply.isPending && (
+                                <div className="circle-owner-actions">
+                                  <button
+                                    type="button"
+                                    aria-label="Edit response"
+                                    disabled={Boolean(workingItem)}
+                                    onClick={() =>
+                                      beginEditing(
+                                        "reply",
+                                        reply.id,
+                                        reply.content
+                                      )
+                                    }
+                                  >
+                                    <Pencil size={13} />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    aria-label="Delete response"
+                                    disabled={Boolean(workingItem)}
+                                    onClick={() =>
+                                      setDeleteTarget({
+                                        kind: "reply",
+                                        id: reply.id,
+                                      })
+                                    }
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          {editingItem?.kind === "reply" &&
+                          editingItem.id === reply.id ? (
+                            <CircleEditComposer
+                              value={editText}
+                              saving={
+                                workingItem === `edit-reply-${reply.id}`
+                              }
+                              compact
+                              onChange={setEditText}
+                              onCancel={() => {
+                                setEditingItem(null);
+                                setEditText("");
+                              }}
+                              onSave={() => void saveEdit()}
+                            />
+                          ) : (
+                            <p>{reply.content}</p>
+                          )}
                         </div>
                       ))}
-
-                      {aiLoading === post.id && (
-                        <div
-                          className="circle-reply-loading"
-                          aria-label="Preparing support response"
-                        >
-                          <span />
-                          <span />
-                          <span />
-                        </div>
-                      )}
 
                       {replyingTo === post.id && (
                         <div className="circle-reply-composer">
@@ -289,11 +769,11 @@ export default function ForumPage() {
                             </button>
                             <button
                               onClick={() => submitReply(post.id)}
-                              disabled={!replyText.trim()}
+                              disabled={!replyText.trim() || submitting}
                               className="circle-share-button"
                               type="button"
                             >
-                              Post response
+                              {submitting ? "Posting" : "Post response"}
                             </button>
                           </div>
                         </div>
@@ -306,6 +786,96 @@ export default function ForumPage() {
           </div>
         </section>
       </div>
+
+      {deleteTarget && (
+        <div
+          className="circle-dialog-backdrop"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !workingItem) {
+              setDeleteTarget(null);
+            }
+          }}
+        >
+          <div
+            className="circle-delete-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="circle-delete-title"
+            aria-describedby="circle-delete-description"
+          >
+            <h2 id="circle-delete-title">
+              Delete {deleteTarget.kind === "post" ? "post" : "response"}?
+            </h2>
+            <p id="circle-delete-description">
+              {deleteTarget.kind === "post"
+                ? "This will permanently remove the post, its responses, and its reactions."
+                : "This response will be permanently removed."}
+            </p>
+            <div>
+              <button
+                type="button"
+                autoFocus
+                disabled={Boolean(workingItem)}
+                onClick={() => setDeleteTarget(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={Boolean(workingItem)}
+                onClick={() => void confirmDelete()}
+              >
+                <Trash2 size={14} />
+                {workingItem ? "Deleting" : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
+  );
+}
+
+function CircleEditComposer({
+  value,
+  saving,
+  compact = false,
+  onChange,
+  onCancel,
+  onSave,
+}: {
+  value: string;
+  saving: boolean;
+  compact?: boolean;
+  onChange: (value: string) => void;
+  onCancel: () => void;
+  onSave: () => void;
+}) {
+  return (
+    <div className={`circle-edit-composer ${compact ? "is-compact" : ""}`}>
+      <textarea
+        value={value}
+        maxLength={2000}
+        rows={compact ? 2 : 3}
+        aria-label={compact ? "Edit response" : "Edit post"}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {detectCrisis(value) && CRISIS_RESOURCES}
+      <div className="circle-edit-actions">
+        <button type="button" onClick={onCancel} disabled={saving}>
+          <X size={14} />
+          Cancel
+        </button>
+        <button
+          type="button"
+          onClick={onSave}
+          disabled={!value.trim() || saving}
+        >
+          <Save size={14} />
+          {saving ? "Saving" : "Save changes"}
+        </button>
+      </div>
+    </div>
   );
 }

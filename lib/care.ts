@@ -1,4 +1,17 @@
 import {
+  deleteCareTaskFromCloud,
+  syncActionPlan,
+  syncActiveCareRecipient,
+  syncCareEvent,
+  syncCareEventOutcome,
+  syncCareRecipient,
+  syncCareTask,
+  syncCaregiverProfile,
+  syncFollowUp,
+  syncFollowUpCompletion,
+  syncWorkflowResult,
+} from "./cloud-sync";
+import {
   INPUT_LIMITS,
   sanitizePlainText,
   sanitizeSingleLine,
@@ -35,10 +48,9 @@ export interface CareRecipient {
   condition: string;
   stage: string;
   livingSituation: string;
-  routines: string[];
   knownTriggers: string[];
   mobility: string;
-  approvedInstructions: string[];
+  careNotes: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -71,8 +83,12 @@ export interface CareTask {
   recipientId: string;
   eventId?: string;
   title: string;
+  details?: string;
   owner: string;
   dueAt?: number;
+  recurrence?: "none" | "daily" | "weekly";
+  reminderMinutes?: number | null;
+  lastCompletedAt?: number;
   completed: boolean;
   createdAt: number;
 }
@@ -101,7 +117,14 @@ export interface CareResource {
   id: string;
   title: string;
   description: string;
-  category: "local-care" | "caregiver-support" | "crisis" | "training";
+  category:
+    | "local-care"
+    | "daily-needs"
+    | "respite"
+    | "caregiver-support"
+    | "care-provider"
+    | "crisis"
+    | "training";
   locationLabel: string;
   url: string;
   phone?: string;
@@ -209,6 +232,7 @@ export function saveCaregiverProfile(
     updatedAt: now,
   };
   writeLocal(KEYS.caregiver, profile);
+  syncCaregiverProfile(profile);
   return profile;
 }
 
@@ -241,13 +265,12 @@ export function saveCareRecipient(
       input.livingSituation,
       INPUT_LIMITS.profileFieldChars
     ),
-    routines: sanitizeTextList(input.routines),
     knownTriggers: sanitizeTextList(input.knownTriggers),
     mobility: sanitizeSingleLine(
       input.mobility,
       INPUT_LIMITS.profileFieldChars
     ),
-    approvedInstructions: sanitizeTextList(input.approvedInstructions),
+    careNotes: sanitizePlainText(input.careNotes, 2_000),
     id: input.id ?? careId("client"),
     createdAt: input.createdAt ?? existing?.createdAt ?? now,
     updatedAt: now,
@@ -256,6 +279,10 @@ export function saveCareRecipient(
     ? recipients.map((item) => (item.id === recipient.id ? recipient : item))
     : [...recipients, recipient];
   writeLocal(KEYS.recipients, updated.slice(-COLLECTION_LIMITS.recipients));
+  syncCareRecipient(
+    recipient,
+    getActiveCareRecipientId() === recipient.id
+  );
   if (!getActiveCareRecipientId()) setActiveCareRecipientId(recipient.id);
   return recipient;
 }
@@ -267,10 +294,9 @@ export function getActiveCareRecipientId(): string | null {
 
 export function setActiveCareRecipientId(id: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(
-    KEYS.activeRecipient,
-    sanitizeSingleLine(id, INPUT_LIMITS.profileFieldChars)
-  );
+  const safeId = sanitizeSingleLine(id, INPUT_LIMITS.profileFieldChars);
+  localStorage.setItem(KEYS.activeRecipient, safeId);
+  syncActiveCareRecipient(safeId);
 }
 
 export function getActiveCareRecipient(): CareRecipient | null {
@@ -283,13 +309,17 @@ export function getCareEvents(): CareEvent[] {
   return readLocal<CareEvent[]>(KEYS.events, []);
 }
 
-export function saveCareEvent(event: CareEvent): void {
+export function saveCareEvent(
+  event: CareEvent,
+  synchronize = true
+): void {
   const events = getCareEvents();
   const existing = events.some((item) => item.id === event.id);
   const updated = existing
     ? events.map((item) => (item.id === event.id ? event : item))
     : [event, ...events];
   writeLocal(KEYS.events, updated.slice(0, COLLECTION_LIMITS.events));
+  if (synchronize) syncCareEvent(event);
 }
 
 export function updateCareEventOutcome(eventId: string, outcome: string): void {
@@ -303,38 +333,105 @@ export function updateCareEventOutcome(eventId: string, outcome: string): void {
       : event
   );
   writeLocal(KEYS.events, events);
+  syncCareEventOutcome(eventId, outcome);
 }
 
 export function getActionPlans(): ActionPlan[] {
   return readLocal<ActionPlan[]>(KEYS.plans, []);
 }
 
-export function saveActionPlan(plan: ActionPlan): void {
+export function saveActionPlan(
+  plan: ActionPlan,
+  synchronize = true
+): void {
   const plans = getActionPlans();
   if (plans.some((item) => item.id === plan.id)) return;
   writeLocal(KEYS.plans, [plan, ...plans].slice(0, COLLECTION_LIMITS.plans));
+  if (synchronize) syncActionPlan(plan);
 }
 
 export function getCareTasks(): CareTask[] {
   return readLocal<CareTask[]>(KEYS.tasks, []);
 }
 
-export function saveCareTask(task: CareTask): void {
+function notifyCareTaskChange(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("ip-care-tasks-changed"));
+}
+
+export function saveCareTask(
+  task: CareTask,
+  synchronize = true
+): void {
   const tasks = getCareTasks();
   const existing = tasks.some((item) => item.id === task.id);
+  const normalized: CareTask = {
+    ...task,
+    details: task.details ?? "",
+    recurrence: task.recurrence ?? "none",
+    reminderMinutes: task.reminderMinutes ?? null,
+  };
   const updated = existing
-    ? tasks.map((item) => (item.id === task.id ? task : item))
-    : [task, ...tasks];
+    ? tasks.map((item) => (item.id === task.id ? normalized : item))
+    : [normalized, ...tasks];
   writeLocal(KEYS.tasks, updated.slice(0, COLLECTION_LIMITS.tasks));
+  if (synchronize) syncCareTask(normalized);
+  notifyCareTaskChange();
+}
+
+function nextRecurringDue(
+  dueAt: number,
+  recurrence: "daily" | "weekly"
+): number {
+  const next = new Date(dueAt);
+  const daysToAdd = recurrence === "daily" ? 1 : 7;
+
+  do {
+    next.setDate(next.getDate() + daysToAdd);
+  } while (next.getTime() <= Date.now());
+
+  return next.getTime();
+}
+
+export function completeCareTask(taskId: string): CareTask | null {
+  const task = getCareTasks().find((item) => item.id === taskId);
+  if (!task) return null;
+
+  const recurrence = task.recurrence ?? "none";
+  const now = Date.now();
+  const updated: CareTask =
+    recurrence !== "none" && task.dueAt
+      ? {
+          ...task,
+          completed: false,
+          dueAt: nextRecurringDue(task.dueAt, recurrence),
+          lastCompletedAt: now,
+        }
+      : { ...task, completed: true, lastCompletedAt: now };
+
+  saveCareTask(updated);
+  return updated;
 }
 
 export function toggleCareTask(taskId: string): void {
+  const task = getCareTasks().find((item) => item.id === taskId);
+  if (!task) return;
+
+  if (!task.completed) {
+    completeCareTask(taskId);
+    return;
+  }
+
+  saveCareTask({ ...task, completed: false, lastCompletedAt: undefined });
+}
+
+export function deleteCareTask(taskId: string): void {
   writeLocal(
     KEYS.tasks,
-    getCareTasks().map((task) =>
-      task.id === taskId ? { ...task, completed: !task.completed } : task
-    )
+    getCareTasks().filter((task) => task.id !== taskId)
   );
+  deleteCareTaskFromCloud(taskId);
+  notifyCareTaskChange();
 }
 
 export function getFollowUps(): FollowUp[] {
@@ -345,13 +442,17 @@ export function getFollowUps(): FollowUp[] {
   );
 }
 
-export function saveFollowUp(followUp: FollowUp): void {
+export function saveFollowUp(
+  followUp: FollowUp,
+  synchronize = true
+): void {
   const followUps = getFollowUps();
   if (followUps.some((item) => item.id === followUp.id)) return;
   writeLocal(
     KEYS.followUps,
     [followUp, ...followUps].slice(0, COLLECTION_LIMITS.followUps)
   );
+  if (synchronize) syncFollowUp(followUp);
 }
 
 export function completeFollowUp(followUpId: string): void {
@@ -361,6 +462,7 @@ export function completeFollowUp(followUpId: string): void {
       followUp.id === followUpId ? { ...followUp, completed: true } : followUp
     )
   );
+  syncFollowUpCompletion(followUpId, true);
 }
 
 export function saveWorkflowResult(workflow: CareWorkflowResult): void {
@@ -403,6 +505,7 @@ export function saveWorkflowResult(workflow: CareWorkflowResult): void {
   writeLocal(KEYS.tasks, tasks);
   writeLocal(KEYS.followUps, followUps);
   writeLocal(KEYS.latestWorkflow, workflow);
+  syncWorkflowResult(workflow, !hasMatchingOpenFollowUp);
 }
 
 export function getLatestWorkflow(): CareWorkflowResult | null {
@@ -465,25 +568,71 @@ export function getCareResources(zipCode = ""): CareResource[] {
   return [
     {
       id: "resource_eldercare",
-      title: "Eldercare Locator",
-      description: "Find local aging, transportation, training, and support services.",
-      category: "local-care",
+      title: "Local caregiver support",
+      description:
+        "Find local counseling, support groups, caregiver training, respite, and help accessing services.",
+      category: "caregiver-support",
       locationLabel: location,
       url: "https://eldercare.acl.gov/home",
       phone: "800-677-1116",
       verifiedBy: "Administration for Community Living",
-      reviewedAt: "March 2, 2026",
+      reviewedAt: "July 27, 2026",
+    },
+    {
+      id: "resource_211",
+      title: "211 local help",
+      description:
+        "Find nearby help with food, utilities, housing, transportation, healthcare, and caregiver needs.",
+      category: "daily-needs",
+      locationLabel: location,
+      url: "https://211.org/about-us/your-local-211",
+      phone: "211",
+      verifiedBy: "United Way 211",
+      reviewedAt: "July 27, 2026",
+    },
+    {
+      id: "resource_respite",
+      title: "National Respite Locator",
+      description:
+        "Search for respite services that can provide a short break from day-to-day caregiving.",
+      category: "respite",
+      locationLabel: location,
+      url: "https://archrespite.org/respitelocator/",
+      verifiedBy: "ARCH National Respite Network",
+      reviewedAt: "July 27, 2026",
+    },
+    {
+      id: "resource_state_support",
+      title: "Caregiver services by state",
+      description:
+        "Browse state-specific caregiver programs, benefits guidance, legal help, and support.",
+      category: "caregiver-support",
+      locationLabel: "All U.S. states",
+      url: "https://www.caregiver.org/connecting-caregivers/services-by-state/",
+      verifiedBy: "Family Caregiver Alliance",
+      reviewedAt: "July 27, 2026",
+    },
+    {
+      id: "resource_care_compare",
+      title: "Medicare Care Compare",
+      description:
+        "Compare Medicare-certified home health, hospice, nursing, and other care providers near you.",
+      category: "care-provider",
+      locationLabel: location,
+      url: "https://www.medicare.gov/care-compare/",
+      verifiedBy: "Medicare",
+      reviewedAt: "July 27, 2026",
     },
     {
       id: "resource_alz",
-      title: "Alzheimer’s Association 24/7 Helpline",
-      description: "Care consultation, local programs, and dementia information.",
+      title: "Dementia caregiver support",
+      description:
+        "Find local caregiver support groups, education, and dementia-specific guidance.",
       category: "caregiver-support",
       locationLabel: location,
-      url: "https://www.alz.org/help-support/resources/helpline",
-      phone: "800-272-3900",
-      verifiedBy: "National Institute on Aging resource listing",
-      reviewedAt: "July 2026",
+      url: "https://www.alz.org/help-support/community",
+      verifiedBy: "Alzheimer’s Association",
+      reviewedAt: "July 27, 2026",
     },
     {
       id: "resource_988",
@@ -494,7 +643,7 @@ export function getCareResources(zipCode = ""): CareResource[] {
       url: "https://988lifeline.org/",
       phone: "988",
       verifiedBy: "U.S. 988 Lifeline",
-      reviewedAt: "July 2026",
+      reviewedAt: "July 27, 2026",
     },
   ];
 }

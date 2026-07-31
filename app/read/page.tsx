@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import Navbar from "@/components/Navbar";
+import ReadResources from "@/components/ReadResources";
 import { GUIDE_ARTICLES } from "@/lib/guide-articles";
 
 export default function ReadPage() {
@@ -57,6 +58,8 @@ export default function ReadPage() {
             </div>
           ))}
         </div>
+
+        <ReadResources />
       </div>
     </main>
   );

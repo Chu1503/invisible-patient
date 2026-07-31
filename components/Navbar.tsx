@@ -1,13 +1,22 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Home, MessageCircle, BarChart2, Users, BookOpen, UserRound } from "lucide-react";
+import {
+  BarChart2,
+  BookOpen,
+  CalendarCheck2,
+  Home,
+  MessageCircle,
+  UserRound,
+  Users,
+} from "lucide-react";
 
 const links = [
   { href: "/",       label: "Home",     Icon: Home },
   { href: "/talk",   label: "Talk",     Icon: MessageCircle },
   { href: "/insights", label: "Insights", Icon: BarChart2 },
   { href: "/forum",  label: "Circle",   Icon: Users },
+  { href: "/tasks", label: "Tasks", Icon: CalendarCheck2 },
   { href: "/read", label: "Read", Icon: BookOpen },
   { href: "/profile", label: "Profile", Icon: UserRound },
 ];

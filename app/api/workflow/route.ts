@@ -8,7 +8,10 @@ import {
   readBoundedJson,
   validateWorkflowPayload,
 } from "@/lib/api-security";
+import { logDevelopmentTiming, perfStart } from "@/lib/performance";
 import { getAllowedAppOrigins, getRateLimitSettings } from "@/lib/server-env";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createClient as createSupabaseClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 
@@ -21,7 +24,26 @@ export async function OPTIONS(request: Request) {
   }
 }
 
+async function hasAuthenticatedAccount(request: Request): Promise<boolean> {
+  if (!isSupabaseConfigured()) return true;
+
+  const origin = request.headers.get("origin");
+  const isInstalledApp =
+    Boolean(origin && getAllowedAppOrigins().includes(origin)) &&
+    request.headers.get("user-agent")?.includes("InvisiblePatient/");
+  if (isInstalledApp) return true;
+
+  const authorization = request.headers.get("authorization");
+  const jwt = authorization?.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length).trim()
+    : undefined;
+  const supabase = await createSupabaseClient();
+  const { data } = await supabase.auth.getClaims(jwt);
+  return Boolean(data?.claims.sub);
+}
+
 export async function POST(request: Request) {
+  const requestStartedAt = perfStart();
   const limits = getRateLimitSettings();
   let corsHeaders: HeadersInit = {};
 
@@ -34,7 +56,7 @@ export async function POST(request: Request) {
         : "Cross-origin requests are not allowed.";
     return NextResponse.json(
       { error: message },
-      { status: 403, headers: { "Cache-Control": "no-store" } }
+      { status: 403, headers: { "Cache-Control": "private, no-store" } }
     );
   }
 
@@ -44,14 +66,13 @@ export async function POST(request: Request) {
     limits.apiRequests,
     limits.windowMs
   );
-
   if (!rateLimit.allowed) {
     return NextResponse.json(
       { error: "Too many requests. Please wait before trying again." },
       {
         status: 429,
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control": "private, no-store",
           ...corsHeaders,
           ...rateLimitHeaders(rateLimit),
         },
@@ -60,13 +81,21 @@ export async function POST(request: Request) {
   }
 
   try {
-    const body = await readBoundedJson(request, 16 * 1024);
+    if (!(await hasAuthenticatedAccount(request))) {
+      return NextResponse.json(
+        { error: "Authentication required." },
+        { status: 401, headers: { ...corsHeaders, "Cache-Control": "private, no-store" } }
+      );
+    }
+
+    const body = await readBoundedJson(request, 50_000);
     const input = validateWorkflowPayload(body);
     const workflow = buildCareWorkflow(input);
+    logDevelopmentTiming("workflow-api.total", requestStartedAt);
 
     return NextResponse.json(workflow, {
       headers: {
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
         ...corsHeaders,
         ...rateLimitHeaders(rateLimit),
@@ -79,7 +108,7 @@ export async function POST(request: Request) {
         {
           status: error.status,
           headers: {
-            "Cache-Control": "no-store",
+            "Cache-Control": "private, no-store",
             ...corsHeaders,
             ...rateLimitHeaders(rateLimit),
           },
@@ -92,7 +121,7 @@ export async function POST(request: Request) {
       {
         status: 500,
         headers: {
-          "Cache-Control": "no-store",
+          "Cache-Control": "private, no-store",
           ...corsHeaders,
           ...rateLimitHeaders(rateLimit),
         },

@@ -174,7 +174,7 @@ export function corsHeadersForRequest(
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
@@ -262,6 +262,11 @@ function sanitizeChatContext(value: unknown): ChatContext | undefined {
           approvedInstructions: optionalStringList(
             recipientSource.approvedInstructions,
             "context.recipient.approvedInstructions"
+          ),
+          careNotes: checkedText(
+            recipientSource.careNotes,
+            "context.recipient.careNotes",
+            2_000
           ),
         }
       : null,
@@ -354,15 +359,10 @@ function sanitizeRecipient(value: unknown): CareRecipient | null {
     stage: checkedText(source.stage, "recipient.stage", 80) ?? "",
     livingSituation:
       checkedText(source.livingSituation, "recipient.livingSituation", 120) ?? "",
-    routines: optionalStringList(source.routines, "recipient.routines") ?? [],
     knownTriggers:
       optionalStringList(source.knownTriggers, "recipient.knownTriggers") ?? [],
     mobility: checkedText(source.mobility, "recipient.mobility", 120) ?? "",
-    approvedInstructions:
-      optionalStringList(
-        source.approvedInstructions,
-        "recipient.approvedInstructions"
-      ) ?? [],
+    careNotes: checkedText(source.careNotes, "recipient.careNotes", 2_000) ?? "",
     createdAt:
       typeof source.createdAt === "number" && Number.isFinite(source.createdAt)
         ? source.createdAt

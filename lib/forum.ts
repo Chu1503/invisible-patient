@@ -1,4 +1,9 @@
+"use client";
+
+import { getActiveCareRecipient } from "./care";
 import { INPUT_LIMITS, sanitizePlainText, sanitizeSingleLine } from "./input";
+import { logDevelopmentTiming, perfStart } from "./performance";
+import { createClient } from "./supabase/client";
 
 export interface ForumPost {
   id: string;
@@ -8,6 +13,10 @@ export interface ForumPost {
   careStage: string;
   replies: ForumReply[];
   hasCrisis: boolean;
+  likes: number;
+  isOwned: boolean;
+  isPending?: boolean;
+  editedAt?: number;
 }
 
 export interface ForumReply {
@@ -16,160 +25,330 @@ export interface ForumReply {
   timestamp: number;
   authorTag: string;
   isAI: boolean;
+  isOwned: boolean;
+  isPending?: boolean;
+  editedAt?: number;
 }
 
-const CARE_STAGES = [
-  "Early-stage dementia caregiving",
-  "Mid-stage dementia caregiving",
-  "Late-stage dementia caregiving",
-  "Brain injury caregiving",
-  "Post-stroke caregiving",
-  "General caregiving",
-];
+export interface ForumFeed {
+  posts: ForumPost[];
+  likedPostIds: Set<string>;
+  currentUserTag: string;
+}
 
-const ANONYMOUS_TAGS = [
-  "WillowMorning","CedarNight","MapleQuiet","RiverStone","OakHollow",
-  "MistField","SageWind","PineHaven","FernValley","IvyBridge","DawnPath",
-  "TwilightMeadow","StillWater","HeatherRidge","BirchGrove",
-];
+const GENERAL_TOPICS = [
+  "Daily care and routines",
+  "Behavior and communication",
+  "Caregiver wellbeing",
+  "Family and support",
+] as const;
+
+const ALIAS_ADJECTIVES = [
+  "Quiet",
+  "Gentle",
+  "Steady",
+  "Kind",
+  "Hopeful",
+  "Patient",
+  "Brave",
+  "Calm",
+] as const;
+
+const ALIAS_NOUNS = [
+  "Willow",
+  "Cedar",
+  "Maple",
+  "River",
+  "Meadow",
+  "Harbor",
+  "Sage",
+  "Dawn",
+] as const;
 
 const CRISIS_WORDS = [
-  "kill","suicide","end it","want to die","can't go on","harm","hurt them",
+  "kill",
+  "suicide",
+  "end it",
+  "want to die",
+  "can't go on",
+  "harm",
+  "hurt them",
 ];
 
-function generateTag(): string {
-  return ANONYMOUS_TAGS[Math.floor(Math.random() * ANONYMOUS_TAGS.length)] +
-    Math.floor(Math.random() * 99 + 1);
-}
+let anonymousTagPromise: Promise<string> | null = null;
 
-function detectCrisis(text: string): boolean {
-  const lower = text.toLowerCase();
-  return CRISIS_WORDS.some((w) => lower.includes(w));
-}
+type ReplyRow = {
+  id: string;
+  content: string;
+  anonymous_tag: string;
+  created_at: string;
+  edited_at: string | null;
+};
 
-const SEED_POSTS: ForumPost[] = [
-  {
-    id: "seed1",
-    content: "3am and he's been awake since midnight, pacing the hallway, calling out for his mother who passed 20 years ago. I don't know how to tell him again. I just sit with him and hold his hand.",
-    timestamp: Date.now() - 1000 * 60 * 60 * 5,
-    authorTag: "WillowMorning42",
-    careStage: "Mid-stage dementia caregiving",
-    hasCrisis: false,
-    replies: [
-      {
-        id: "r1",
-        content: "I've been through exactly this. Sundowning at 3am with my mom. You're not alone in this moment, even when it feels like the whole world is asleep except you two.",
-        timestamp: Date.now() - 1000 * 60 * 60 * 4,
-        authorTag: "CedarNight17",
-        isAI: false,
-      },
-    ],
-  },
-  {
-    id: "seed2",
-    content: "I snapped at him today. He asked me the same question for the 40th time and I just raised my voice. He looked so confused and scared. I feel like a monster. How do you forgive yourself?",
-    timestamp: Date.now() - 1000 * 60 * 60 * 12,
-    authorTag: "MapleQuiet83",
-    careStage: "Mid-stage dementia caregiving",
-    hasCrisis: false,
-    replies: [
-      {
-        id: "r2",
-        content: "You are not a monster. You are a human being who is exhausted beyond what most people could imagine. The guilt means you love him. Be as gentle with yourself as you are with him.",
-        timestamp: Date.now() - 1000 * 60 * 60 * 11,
-        authorTag: "AI Companion",
-        isAI: true,
-      },
-    ],
-  },
-  {
-    id: "seed3",
-    content: "My siblings haven't visited in 4 months. They ask how dad is doing on the phone but never ask how I'm doing. I've become invisible.",
-    timestamp: Date.now() - 1000 * 60 * 60 * 24,
-    authorTag: "RiverStone29",
-    careStage: "Late-stage dementia caregiving",
-    hasCrisis: false,
-    replies: [],
-  },
-];
+type PostRow = {
+  id: string;
+  content: string;
+  topic: string;
+  anonymous_tag: string;
+  created_at: string;
+  edited_at: string | null;
+  likes_count: number;
+  circle_replies: ReplyRow[] | null;
+};
 
-export function getPosts(): ForumPost[] {
-  if (typeof window === "undefined") return SEED_POSTS;
-  const raw = localStorage.getItem("ip_forum");
-  if (!raw) {
-    localStorage.setItem("ip_forum", JSON.stringify(SEED_POSTS));
-    return SEED_POSTS;
+type OwnedContentRow = {
+  content_type: "post" | "reply";
+  content_id: string;
+};
+
+function stableHash(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
   }
-  try { return JSON.parse(raw); } catch { return SEED_POSTS; }
+  return hash >>> 0;
 }
 
-export function savePosts(posts: ForumPost[]): void {
-  if (typeof window === "undefined") return;
-  const bounded = posts.slice(0, 100).map((post) => ({
-    ...post,
-    content: sanitizePlainText(post.content, INPUT_LIMITS.forumPostChars),
-    careStage: CARE_STAGES.includes(post.careStage)
-      ? post.careStage
-      : CARE_STAGES[0],
-    replies: post.replies.slice(-50).map((reply) => ({
-      ...reply,
-      content: sanitizePlainText(reply.content, INPUT_LIMITS.forumReplyChars),
-    })),
-  }));
-  localStorage.setItem("ip_forum", JSON.stringify(bounded));
+async function getAnonymousTag(): Promise<string> {
+  if (!anonymousTagPromise) {
+    anonymousTagPromise = (async () => {
+      const { data, error } = await createClient().auth.getClaims();
+      const userId = data?.claims.sub;
+      if (error || !userId) {
+        throw error ?? new Error("Authentication required");
+      }
+
+      const firstHash = stableHash(userId);
+      const secondHash = stableHash(`${userId}:circle`);
+      const adjective = ALIAS_ADJECTIVES[firstHash % ALIAS_ADJECTIVES.length];
+      const noun = ALIAS_NOUNS[secondHash % ALIAS_NOUNS.length];
+      const number = (stableHash(`${userId}:number`) % 90) + 10;
+      return `${adjective}${noun}${number}`;
+    })().catch((error) => {
+      anonymousTagPromise = null;
+      throw error;
+    });
+  }
+
+  return anonymousTagPromise;
 }
 
-export function getMyTag(): string {
-  if (typeof window === "undefined") return "Anonymous";
-  const existing = localStorage.getItem("ip_forum_tag");
-  if (existing) return existing;
-  const tag = generateTag();
-  localStorage.setItem("ip_forum_tag", tag);
-  return tag;
+function stageLabel(stage: string): string {
+  const normalized = stage.toLowerCase();
+  if (normalized.startsWith("early")) return "Early stage";
+  if (normalized.startsWith("middle")) return "Middle stage";
+  if (normalized.startsWith("late")) return "Late stage";
+  return "Stage not specified";
 }
 
-export function getMyStage(): string {
-  if (typeof window === "undefined") return CARE_STAGES[0];
-  const existing = localStorage.getItem("ip_forum_stage");
-  return existing || CARE_STAGES[0];
-}
+export function getCircleTopics(): string[] {
+  const recipient = getActiveCareRecipient();
+  if (!recipient) return [...GENERAL_TOPICS];
 
-export function saveMyStage(stage: string): void {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(
-    "ip_forum_stage",
-    CARE_STAGES.includes(stage) ? stage : CARE_STAGES[0]
+  return Array.from(
+    new Set([
+      `${recipient.condition} · ${stageLabel(recipient.stage)}`,
+      `${recipient.condition} caregiving`,
+      ...GENERAL_TOPICS,
+    ])
   );
 }
 
-export function createPost(content: string, stage: string): ForumPost {
+export function detectCrisis(text: string): boolean {
+  const lower = text.toLowerCase();
+  return CRISIS_WORDS.some((word) => lower.includes(word));
+}
+
+export async function getForumFeed(): Promise<ForumFeed> {
+  const feedStartedAt = perfStart();
+  const supabase = createClient();
+  const [postsResult, ownershipResult, currentUserTag] = await Promise.all([
+    supabase
+      .from("circle_posts")
+      .select(
+        "id, content, topic, anonymous_tag, created_at, edited_at, likes_count, circle_replies(id, content, anonymous_tag, created_at, edited_at)"
+      )
+      .order("created_at", { ascending: false })
+      .limit(50),
+    supabase.rpc("get_my_circle_content_ids"),
+    getAnonymousTag(),
+  ]);
+
+  if (postsResult.error) throw postsResult.error;
+  if (ownershipResult.error) throw ownershipResult.error;
+
+  const rows = (postsResult.data ?? []) as PostRow[];
+  const postIds = rows.map((row) => row.id);
+  let likedPostIds = new Set<string>();
+  const ownedRows = (ownershipResult.data ?? []) as OwnedContentRow[];
+  const ownedPostIds = new Set(
+    ownedRows
+      .filter((row) => row.content_type === "post")
+      .map((row) => row.content_id)
+  );
+  const ownedReplyIds = new Set(
+    ownedRows
+      .filter((row) => row.content_type === "reply")
+      .map((row) => row.content_id)
+  );
+
+  if (postIds.length) {
+    const { data: likes, error: likesError } = await supabase
+      .from("circle_likes")
+      .select("post_id")
+      .in("post_id", postIds);
+    if (likesError) throw likesError;
+    likedPostIds = new Set(
+      (likes ?? []).map((like: { post_id: string }) => String(like.post_id))
+    );
+  }
+
+  const posts = rows.map((row) => ({
+    id: row.id,
+    content: row.content,
+    timestamp: new Date(row.created_at).getTime(),
+    authorTag: row.anonymous_tag,
+    careStage: row.topic,
+    hasCrisis: detectCrisis(row.content),
+    likes: row.likes_count,
+    isOwned: ownedPostIds.has(row.id),
+    editedAt: row.edited_at
+      ? new Date(row.edited_at).getTime()
+      : undefined,
+    replies: (row.circle_replies ?? [])
+      .map((reply) => ({
+        id: reply.id,
+        content: reply.content,
+        timestamp: new Date(reply.created_at).getTime(),
+        authorTag: reply.anonymous_tag,
+        isAI: false,
+        isOwned: ownedReplyIds.has(reply.id),
+        editedAt: reply.edited_at
+          ? new Date(reply.edited_at).getTime()
+          : undefined,
+      }))
+      .sort((a, b) => a.timestamp - b.timestamp),
+  }));
+
+  logDevelopmentTiming("circle.feed", feedStartedAt);
+  return { posts, likedPostIds, currentUserTag };
+}
+
+export async function createPost(
+  content: string,
+  topic: string,
+  knownAnonymousTag?: string
+): Promise<ForumPost> {
+  const safeContent = sanitizePlainText(content, INPUT_LIMITS.forumPostChars);
+  const safeTopic = sanitizeSingleLine(topic, 120);
+  const anonymousTag = knownAnonymousTag ?? (await getAnonymousTag());
+  const { data, error } = await createClient()
+    .from("circle_posts")
+    .insert({
+      content: safeContent,
+      topic: safeTopic,
+      anonymous_tag: anonymousTag,
+    })
+    .select(
+      "id, content, topic, anonymous_tag, created_at, edited_at, likes_count"
+    )
+    .single();
+  if (error) throw error;
+  const row = data as Omit<PostRow, "circle_replies">;
   return {
-    id:
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2) + Date.now().toString(36),
-    content: sanitizePlainText(content, INPUT_LIMITS.forumPostChars),
-    timestamp: Date.now(),
-    authorTag: getMyTag(),
-    careStage: CARE_STAGES.includes(stage)
-      ? sanitizeSingleLine(stage, 80)
-      : CARE_STAGES[0],
-    hasCrisis: detectCrisis(content),
+    id: row.id,
+    content: row.content,
+    timestamp: new Date(row.created_at).getTime(),
+    authorTag: row.anonymous_tag,
+    careStage: row.topic,
     replies: [],
+    hasCrisis: detectCrisis(row.content),
+    likes: row.likes_count,
+    isOwned: true,
+    editedAt: row.edited_at
+      ? new Date(row.edited_at).getTime()
+      : undefined,
   };
 }
 
-export function createReply(content: string, isAI = false): ForumReply {
+export async function createReply(
+  postId: string,
+  content: string,
+  knownAnonymousTag?: string
+): Promise<ForumReply> {
+  const safePostId = sanitizeSingleLine(postId, 120);
+  const safeContent = sanitizePlainText(content, INPUT_LIMITS.forumReplyChars);
+  const anonymousTag = knownAnonymousTag ?? (await getAnonymousTag());
+  const { data, error } = await createClient()
+    .from("circle_replies")
+    .insert({
+      post_id: safePostId,
+      content: safeContent,
+      anonymous_tag: anonymousTag,
+    })
+    .select("id, content, anonymous_tag, created_at, edited_at")
+    .single();
+  if (error) throw error;
+  const row = data as ReplyRow;
   return {
-    id:
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : Math.random().toString(36).slice(2) + Date.now().toString(36),
-    content: sanitizePlainText(content, INPUT_LIMITS.forumReplyChars),
-    timestamp: Date.now(),
-    authorTag: isAI ? "AI Companion" : getMyTag(),
-    isAI,
+    id: row.id,
+    content: row.content,
+    timestamp: new Date(row.created_at).getTime(),
+    authorTag: row.anonymous_tag,
+    isAI: false,
+    isOwned: true,
+    editedAt: row.edited_at
+      ? new Date(row.edited_at).getTime()
+      : undefined,
   };
+}
+
+export async function togglePostLike(
+  postId: string,
+  currentlyLiked: boolean
+): Promise<void> {
+  const request = currentlyLiked
+    ? createClient().from("circle_likes").delete().eq("post_id", postId)
+    : createClient().from("circle_likes").insert({ post_id: postId });
+  const { error } = await request;
+  if (error) throw error;
+}
+
+export async function updateForumPost(
+  postId: string,
+  content: string
+): Promise<void> {
+  const { error } = await createClient().rpc("update_circle_post", {
+    p_post_id: sanitizeSingleLine(postId, 120),
+    p_content: sanitizePlainText(content, INPUT_LIMITS.forumPostChars),
+  });
+  if (error) throw error;
+}
+
+export async function updateForumReply(
+  replyId: string,
+  content: string
+): Promise<void> {
+  const { error } = await createClient().rpc("update_circle_reply", {
+    p_reply_id: sanitizeSingleLine(replyId, 120),
+    p_content: sanitizePlainText(content, INPUT_LIMITS.forumReplyChars),
+  });
+  if (error) throw error;
+}
+
+export async function deleteForumPost(postId: string): Promise<void> {
+  const { error } = await createClient().rpc("delete_circle_post", {
+    p_post_id: sanitizeSingleLine(postId, 120),
+  });
+  if (error) throw error;
+}
+
+export async function deleteForumReply(replyId: string): Promise<void> {
+  const { error } = await createClient().rpc("delete_circle_reply", {
+    p_reply_id: sanitizeSingleLine(replyId, 120),
+  });
+  if (error) throw error;
 }
 
 export function formatTimeAgo(timestamp: number): string {
@@ -182,5 +361,3 @@ export function formatTimeAgo(timestamp: number): string {
   if (hours < 24) return `${hours}h ago`;
   return `${days}d ago`;
 }
-
-export { CARE_STAGES, detectCrisis };

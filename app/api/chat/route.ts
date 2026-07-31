@@ -9,11 +9,14 @@ import {
   readBoundedJson,
   validateChatPayload,
 } from "@/lib/api-security";
+import { logDevelopmentTiming, perfStart } from "@/lib/performance";
 import {
   getAllowedAppOrigins,
   getAnthropicSettings,
   getRateLimitSettings,
 } from "@/lib/server-env";
+import { isSupabaseConfigured } from "@/lib/supabase/config";
+import { createClient as createSupabaseClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
 export const maxDuration = 45;
@@ -37,7 +40,7 @@ function jsonError(
     {
       status,
       headers: {
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
         ...headers,
       },
@@ -45,8 +48,27 @@ function jsonError(
   );
 }
 
+async function hasAuthenticatedAccount(request: Request): Promise<boolean> {
+  if (!isSupabaseConfigured()) return true;
+
+  const origin = request.headers.get("origin");
+  const isInstalledApp =
+    Boolean(origin && getAllowedAppOrigins().includes(origin)) &&
+    request.headers.get("user-agent")?.includes("InvisiblePatient/");
+  if (isInstalledApp) return true;
+
+  const authorization = request.headers.get("authorization");
+  const jwt = authorization?.startsWith("Bearer ")
+    ? authorization.slice("Bearer ".length).trim()
+    : undefined;
+  const supabase = await createSupabaseClient();
+  const { data } = await supabase.auth.getClaims(jwt);
+  return Boolean(data?.claims.sub);
+}
+
 export async function POST(request: Request) {
   const startedAt = performance.now();
+  const requestStartedAt = perfStart();
   const limits = getRateLimitSettings();
   let corsHeaders: HeadersInit = {};
 
@@ -66,7 +88,6 @@ export async function POST(request: Request) {
     limits.apiRequests,
     limits.windowMs
   );
-
   if (!apiLimit.allowed) {
     return jsonError(
       "Too many requests. Please wait before trying again.",
@@ -76,6 +97,12 @@ export async function POST(request: Request) {
   }
 
   try {
+    const authStartedAt = perfStart();
+    if (!(await hasAuthenticatedAccount(request))) {
+      return jsonError("Authentication required.", 401, corsHeaders);
+    }
+    logDevelopmentTiming("chat-api.auth", authStartedAt);
+
     const body = await readBoundedJson(request);
     const { messages, context } = validateChatPayload(body);
     const settings = getAnthropicSettings();
@@ -128,6 +155,7 @@ export async function POST(request: Request) {
       messages,
     });
     const upstreamReadyAt = performance.now();
+    logDevelopmentTiming("chat-api.response-ready", requestStartedAt);
 
     const encoder = new TextEncoder();
     const readable = new ReadableStream<Uint8Array>({
@@ -154,7 +182,7 @@ export async function POST(request: Request) {
     return new Response(readable, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, no-store",
         "X-Content-Type-Options": "nosniff",
         "Server-Timing": [
           `validation;dur=${(validatedAt - startedAt).toFixed(1)}`,
