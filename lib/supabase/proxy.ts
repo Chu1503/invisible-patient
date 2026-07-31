@@ -2,7 +2,15 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 import { getSupabaseConfig, isSupabaseConfigured } from "./config";
 
-const PUBLIC_PATHS = ["/auth", "/auth/callback", "/privacy", "/terms"];
+const PUBLIC_PATHS = [
+  "/auth",
+  "/auth/callback",
+  "/privacy",
+  "/terms",
+  "/manifest.webmanifest",
+  "/sw.js",
+  "/offline.html",
+];
 
 function isPublicPath(pathname: string): boolean {
   return PUBLIC_PATHS.some(
@@ -15,8 +23,10 @@ function isApiPath(pathname: string): boolean {
 }
 
 export async function updateSession(request: NextRequest) {
+  const pathname = request.nextUrl.pathname;
+
   if (!isSupabaseConfigured()) {
-    if (request.nextUrl.pathname === "/auth") return NextResponse.next();
+    if (isPublicPath(pathname)) return NextResponse.next();
     const url = request.nextUrl.clone();
     url.pathname = "/auth";
     url.searchParams.set("configuration", "missing");
@@ -48,8 +58,6 @@ export async function updateSession(request: NextRequest) {
 
   const { data } = await supabase.auth.getClaims();
   const claims = data?.claims;
-  const pathname = request.nextUrl.pathname;
-
   if (isApiPath(pathname)) return response;
 
   if (!claims && !isPublicPath(pathname)) {
