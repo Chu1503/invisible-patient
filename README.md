@@ -102,3 +102,73 @@ User
   -> Client-side analysis runs after session
   -> Results saved to localStorage
   -> Dashboard and trends update
+```
+
+## Environment and security
+
+Copy `.env.example` to `.env.local` and set `ANTHROPIC_API_KEY`. Environment
+files are ignored by Git, and the API key is read only inside the server route.
+Do not use a `NEXT_PUBLIC_` prefix for secrets.
+
+Optional environment variables control the Claude model, output length,
+timeouts, retries, request limits, and token budget. The default API window is
+15 minutes. `LOGIN_RATE_LIMIT_MAX` is fixed at five by default and should be
+used by the login route when authentication is added.
+
+The current limiter is process-local, which is appropriate for this single
+instance prototype. Before running multiple production instances, back the same
+limits with a shared store such as Redis or platform KV so users cannot receive
+a fresh bucket on another instance.
+
+## Local validation
+
+Run `npm run check` before committing. It scans for hardcoded credentials, runs
+the production dependency audit, lint, and a production build. The chat endpoint also exposes a
+`Server-Timing` response header so validation and Claude setup latency can be
+separated in browser network tools.
+
+## Installable web app
+
+The website includes a web app manifest, branded icons, a conservative service
+worker, and an install guide. Android browsers can show the native install
+prompt. On iPhone or iPad, open the site in Safari, tap Share, and choose
+**Add to Home Screen**. The deployed website must use HTTPS.
+
+The service worker never caches API responses or conversations. Profile,
+check-in, and care context data continue to use device-local storage.
+
+## Android app
+
+The `android/` directory is a Capacitor 8 project. Its UI is bundled into the
+APK instead of loading the entire production website in a remote WebView.
+Claude requests are sent to the deployed website's protected `/api/chat`
+endpoint.
+
+Add the deployed HTTPS origin to `.env.local`:
+
+```env
+MOBILE_API_BASE_URL=https://your-production-domain.example
+```
+
+Then build a debug APK:
+
+```powershell
+npm run mobile:apk
+```
+
+The finished file is copied to:
+
+```text
+artifacts/invisible-patient-debug.apk
+```
+
+To work in Android Studio, run `npm run mobile:sync`, then open the `android/`
+folder in Android Studio. Install Android SDK Platform 36 if Android Studio asks
+for it. Use the Run button for a connected device or emulator.
+
+For a Play Store or externally distributed release, use Android Studio's
+**Build > Generate Signed App Bundle or APK** flow. Keep the signing keystore
+and passwords outside this repository.
+
+Native iOS builds require macOS and Xcode. The PWA installation works on iPhone
+without Xcode or App Store submission.

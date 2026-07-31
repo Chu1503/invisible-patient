@@ -217,6 +217,7 @@ export default function ProfilePage() {
                   <input
                     required
                     className={inputClass}
+                    maxLength={120}
                     value={profileDraft.displayName}
                     onChange={(event) =>
                       setProfileDraft({
@@ -232,6 +233,8 @@ export default function ProfilePage() {
                   <input
                     className={inputClass}
                     inputMode="numeric"
+                    pattern="[0-9]{5}"
+                    title="Enter a five digit ZIP code"
                     maxLength={5}
                     value={profileDraft.zipCode}
                     onChange={(event) =>
@@ -504,6 +507,7 @@ function Field({
       <input
         className={inputClass}
         required={required}
+        maxLength={600}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         placeholder={placeholder}

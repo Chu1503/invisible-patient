@@ -4,6 +4,9 @@ import { useState, useRef, useEffect } from "react";
 import { Send, Mic } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { analyzeConversation } from "@/lib/analysis";
+import { readApiError, requestChat } from "@/lib/chat-client";
+import { buildCareWorkflow } from "@/lib/care-workflows";
+import { INPUT_LIMITS, sanitizePlainText } from "@/lib/input";
 import {
   saveCheckin,
   saveLastMentalState,
@@ -18,7 +21,6 @@ import {
   getCaregiverProfile,
   saveWorkflowResult,
   type CareRecipient,
-  type CareWorkflowResult,
   type CaregiverProfile,
 } from "@/lib/care";
 
@@ -88,6 +90,13 @@ export default function TalkPage() {
   ) {
     const analysis = analyzeConversation(newMessages, updatedZbiAnswers);
     setRequestError("");
+    const assistantMsg: Message = {
+      id: generateId(),
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+    };
+    setMessages([...newMessages, assistantMsg]);
 
     saveLastMentalState(analysis.mentalState);
 
@@ -108,38 +117,24 @@ export default function TalkPage() {
       riskLevel: analysis.riskLevel,
     });
 
-    let workflow: CareWorkflowResult | null = null;
+    let workflow: ReturnType<typeof buildCareWorkflow> = null;
     try {
-      const workflowResponse = await fetch("/api/workflow", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: caregiverText,
-          recipient,
-          recentEvents: getCareEvents().slice(0, 20),
-          zipCode: caregiver?.zipCode,
-          caregiverName: caregiver?.displayName,
-        }),
+      workflow = buildCareWorkflow({
+        message: caregiverText,
+        recipient,
+        recentEvents: getCareEvents().slice(0, 20),
+        zipCode: caregiver?.zipCode,
+        caregiverName: caregiver?.displayName,
       });
-      if (workflowResponse.ok) {
-        const preparedWorkflow =
-          (await workflowResponse.json()) as CareWorkflowResult | null;
-        if (preparedWorkflow) {
-          workflow = preparedWorkflow;
-          saveWorkflowResult(preparedWorkflow);
-        }
+      if (workflow) {
+        saveWorkflowResult(workflow);
       }
     } catch {
       workflow = null;
     }
 
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: newMessages.map((m) => ({
+    const res = await requestChat({
+        messages: newMessages.slice(-INPUT_LIMITS.chatMessages).map((m) => ({
           role: m.role,
           content: m.content,
         })),
@@ -151,25 +146,21 @@ export default function TalkPage() {
           recipient,
           workflow,
         },
-      }),
     });
 
     if (!res.ok || !res.body) {
+      setMessages((current) =>
+        current.filter((message) => message.id !== assistantMsg.id)
+      );
       setLoading(false);
       setRequestError(
-        "The companion could not respond. Your care note and next steps were still saved."
+        await readApiError(
+          res,
+          "The companion could not respond. Your care note and next steps were still saved."
+        )
       );
       return;
     }
-
-    const assistantMsg: Message = {
-      id: generateId(),
-      role: "assistant",
-      content: "",
-      timestamp: Date.now(),
-    };
-
-    setMessages((prev) => [...prev, assistantMsg]);
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -219,7 +210,8 @@ export default function TalkPage() {
   async function sendMessage() {
     if (!canSend || loading) return;
 
-    const text = input.trim();
+    const text = sanitizePlainText(input, INPUT_LIMITS.chatMessageChars);
+    if (!text) return;
 
     const userMsg: Message = {
       id: generateId(),
@@ -450,6 +442,7 @@ export default function TalkPage() {
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              maxLength={INPUT_LIMITS.chatMessageChars}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();

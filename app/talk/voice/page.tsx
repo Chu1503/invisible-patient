@@ -4,6 +4,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, MicOff, X, Volume2 } from "lucide-react";
 import { analyzeConversation } from "@/lib/analysis";
+import { readApiError, requestChat } from "@/lib/chat-client";
+import { buildCareWorkflow } from "@/lib/care-workflows";
+import { INPUT_LIMITS, sanitizePlainText } from "@/lib/input";
 import {
   saveCheckin,
   saveLastMentalState,
@@ -17,7 +20,6 @@ import {
   getCaregiverProfile,
   saveWorkflowResult,
   type CareRecipient,
-  type CareWorkflowResult,
   type CaregiverProfile,
 } from "@/lib/care";
 
@@ -327,7 +329,7 @@ export default function VoicePage() {
   }, [mounted, voiceSupported, greetingSpoken, initialMessage.content, speak]);
 
   async function handleFinalTranscript(text: string) {
-    const cleanedText = text.trim();
+    const cleanedText = sanitizePlainText(text, INPUT_LIMITS.chatMessageChars);
     if (!cleanedText) return;
     if (isProcessingRef.current) return;
 
@@ -349,7 +351,13 @@ export default function VoicePage() {
     };
 
     const newMessages = [...messages, userMsg];
-    setMessages(newMessages);
+    const assistantMsg: Message = {
+      id: generateId(),
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+    };
+    setMessages([...newMessages, assistantMsg]);
     setTranscript("");
 
     let updatedZbiAnswers = [...zbiAnswers];
@@ -382,38 +390,24 @@ export default function VoicePage() {
       riskLevel: analysis.riskLevel,
     });
 
-    let workflow: CareWorkflowResult | null = null;
+    let workflow: ReturnType<typeof buildCareWorkflow> = null;
     try {
-      const workflowResponse = await fetch("/api/workflow", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: cleanedText,
-          recipient,
-          recentEvents: getCareEvents().slice(0, 20),
-          zipCode: caregiver?.zipCode,
-          caregiverName: caregiver?.displayName,
-        }),
+      workflow = buildCareWorkflow({
+        message: cleanedText,
+        recipient,
+        recentEvents: getCareEvents().slice(0, 20),
+        zipCode: caregiver?.zipCode,
+        caregiverName: caregiver?.displayName,
       });
-      if (workflowResponse.ok) {
-        const preparedWorkflow =
-          (await workflowResponse.json()) as CareWorkflowResult | null;
-        if (preparedWorkflow) {
-          workflow = preparedWorkflow;
-          saveWorkflowResult(preparedWorkflow);
-        }
+      if (workflow) {
+        saveWorkflowResult(workflow);
       }
     } catch {
       workflow = null;
     }
 
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        messages: newMessages.map((m) => ({
+    const res = await requestChat({
+        messages: newMessages.slice(-INPUT_LIMITS.chatMessages).map((m) => ({
           role: m.role,
           content: m.content,
         })),
@@ -425,26 +419,22 @@ export default function VoicePage() {
           recipient,
           workflow,
         },
-      }),
     });
 
     if (!res.ok || !res.body) {
+      setMessages((current) =>
+        current.filter((message) => message.id !== assistantMsg.id)
+      );
       isProcessingRef.current = false;
       setVoiceState("idle");
       setRequestError(
-        "The companion could not respond. Your care note and next steps were still saved."
+        await readApiError(
+          res,
+          "The companion could not respond. Your care note and next steps were still saved."
+        )
       );
       return;
     }
-
-    const assistantMsg: Message = {
-      id: generateId(),
-      role: "assistant",
-      content: "",
-      timestamp: Date.now(),
-    };
-
-    setMessages((prev) => [...prev, assistantMsg]);
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();

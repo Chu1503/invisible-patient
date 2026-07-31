@@ -1,3 +1,10 @@
+import {
+  INPUT_LIMITS,
+  sanitizePlainText,
+  sanitizeSingleLine,
+  sanitizeTextList,
+} from "./input";
+
 export type CareIssue =
   | "wandering"
   | "agitation"
@@ -130,6 +137,14 @@ const KEYS = {
   latestWorkflow: "ip_latest_workflow",
 };
 
+const COLLECTION_LIMITS = {
+  recipients: 10,
+  events: 200,
+  plans: 200,
+  tasks: 200,
+  followUps: 100,
+} as const;
+
 function readLocal<T>(key: string, fallback: T): T {
   if (typeof window === "undefined") return fallback;
   const raw = localStorage.getItem(key);
@@ -147,7 +162,11 @@ function writeLocal<T>(key: string, value: T): void {
 }
 
 export function careId(prefix: string): string {
-  return `${prefix}_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  const suffix =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+  return `${prefix}_${suffix}`;
 }
 
 export function getCaregiverProfile(): CaregiverProfile | null {
@@ -162,8 +181,29 @@ export function saveCaregiverProfile(
 ): CaregiverProfile {
   const existing = getCaregiverProfile();
   const now = Date.now();
+  const communicationPreference = ["gentle", "direct", "balanced"].includes(
+    input.communicationPreference
+  )
+    ? input.communicationPreference
+    : "balanced";
   const profile: CaregiverProfile = {
-    ...input,
+    displayName: sanitizeSingleLine(
+      input.displayName,
+      INPUT_LIMITS.profileFieldChars
+    ),
+    role: sanitizeSingleLine(input.role, INPUT_LIMITS.profileFieldChars),
+    employer: sanitizeSingleLine(input.employer, INPUT_LIMITS.profileFieldChars),
+    shift: sanitizeSingleLine(input.shift, INPUT_LIMITS.profileFieldChars),
+    experience: sanitizeSingleLine(
+      input.experience,
+      INPUT_LIMITS.profileFieldChars
+    ),
+    communicationPreference,
+    zipCode: sanitizeSingleLine(input.zipCode, 12),
+    supportContact: sanitizeSingleLine(
+      input.supportContact,
+      INPUT_LIMITS.profileFieldChars
+    ),
     id: input.id ?? existing?.id ?? careId("caregiver"),
     createdAt: input.createdAt ?? existing?.createdAt ?? now,
     updatedAt: now,
@@ -188,7 +228,26 @@ export function saveCareRecipient(
     : undefined;
   const now = Date.now();
   const recipient: CareRecipient = {
-    ...input,
+    clientCode: sanitizeSingleLine(
+      input.clientCode,
+      INPUT_LIMITS.profileFieldChars
+    ),
+    condition: sanitizeSingleLine(
+      input.condition,
+      INPUT_LIMITS.profileFieldChars
+    ),
+    stage: sanitizeSingleLine(input.stage, 80),
+    livingSituation: sanitizeSingleLine(
+      input.livingSituation,
+      INPUT_LIMITS.profileFieldChars
+    ),
+    routines: sanitizeTextList(input.routines),
+    knownTriggers: sanitizeTextList(input.knownTriggers),
+    mobility: sanitizeSingleLine(
+      input.mobility,
+      INPUT_LIMITS.profileFieldChars
+    ),
+    approvedInstructions: sanitizeTextList(input.approvedInstructions),
     id: input.id ?? careId("client"),
     createdAt: input.createdAt ?? existing?.createdAt ?? now,
     updatedAt: now,
@@ -196,7 +255,7 @@ export function saveCareRecipient(
   const updated = existing
     ? recipients.map((item) => (item.id === recipient.id ? recipient : item))
     : [...recipients, recipient];
-  writeLocal(KEYS.recipients, updated);
+  writeLocal(KEYS.recipients, updated.slice(-COLLECTION_LIMITS.recipients));
   if (!getActiveCareRecipientId()) setActiveCareRecipientId(recipient.id);
   return recipient;
 }
@@ -208,7 +267,10 @@ export function getActiveCareRecipientId(): string | null {
 
 export function setActiveCareRecipientId(id: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(KEYS.activeRecipient, id);
+  localStorage.setItem(
+    KEYS.activeRecipient,
+    sanitizeSingleLine(id, INPUT_LIMITS.profileFieldChars)
+  );
 }
 
 export function getActiveCareRecipient(): CareRecipient | null {
@@ -224,18 +286,20 @@ export function getCareEvents(): CareEvent[] {
 export function saveCareEvent(event: CareEvent): void {
   const events = getCareEvents();
   const existing = events.some((item) => item.id === event.id);
-  writeLocal(
-    KEYS.events,
-    existing
-      ? events.map((item) => (item.id === event.id ? event : item))
-      : [event, ...events]
-  );
+  const updated = existing
+    ? events.map((item) => (item.id === event.id ? event : item))
+    : [event, ...events];
+  writeLocal(KEYS.events, updated.slice(0, COLLECTION_LIMITS.events));
 }
 
 export function updateCareEventOutcome(eventId: string, outcome: string): void {
   const events = getCareEvents().map((event) =>
     event.id === eventId
-      ? { ...event, outcome: outcome.trim(), status: "resolved" as const }
+      ? {
+          ...event,
+          outcome: sanitizePlainText(outcome, 500),
+          status: "resolved" as const,
+        }
       : event
   );
   writeLocal(KEYS.events, events);
@@ -248,7 +312,7 @@ export function getActionPlans(): ActionPlan[] {
 export function saveActionPlan(plan: ActionPlan): void {
   const plans = getActionPlans();
   if (plans.some((item) => item.id === plan.id)) return;
-  writeLocal(KEYS.plans, [plan, ...plans]);
+  writeLocal(KEYS.plans, [plan, ...plans].slice(0, COLLECTION_LIMITS.plans));
 }
 
 export function getCareTasks(): CareTask[] {
@@ -258,12 +322,10 @@ export function getCareTasks(): CareTask[] {
 export function saveCareTask(task: CareTask): void {
   const tasks = getCareTasks();
   const existing = tasks.some((item) => item.id === task.id);
-  writeLocal(
-    KEYS.tasks,
-    existing
-      ? tasks.map((item) => (item.id === task.id ? task : item))
-      : [task, ...tasks]
-  );
+  const updated = existing
+    ? tasks.map((item) => (item.id === task.id ? task : item))
+    : [task, ...tasks];
+  writeLocal(KEYS.tasks, updated.slice(0, COLLECTION_LIMITS.tasks));
 }
 
 export function toggleCareTask(taskId: string): void {
@@ -286,7 +348,10 @@ export function getFollowUps(): FollowUp[] {
 export function saveFollowUp(followUp: FollowUp): void {
   const followUps = getFollowUps();
   if (followUps.some((item) => item.id === followUp.id)) return;
-  writeLocal(KEYS.followUps, [followUp, ...followUps]);
+  writeLocal(
+    KEYS.followUps,
+    [followUp, ...followUps].slice(0, COLLECTION_LIMITS.followUps)
+  );
 }
 
 export function completeFollowUp(followUpId: string): void {
@@ -300,7 +365,10 @@ export function completeFollowUp(followUpId: string): void {
 
 export function saveWorkflowResult(workflow: CareWorkflowResult): void {
   const existingEvents = getCareEvents();
-  const hasMatchingOpenFollowUp = getFollowUps().some((followUp) => {
+  const existingPlans = getActionPlans();
+  const existingTasks = getCareTasks();
+  const existingFollowUps = getFollowUps();
+  const hasMatchingOpenFollowUp = existingFollowUps.some((followUp) => {
     if (followUp.completed || followUp.recipientId !== workflow.event.recipientId) {
       return false;
     }
@@ -310,12 +378,30 @@ export function saveWorkflowResult(workflow: CareWorkflowResult): void {
     );
   });
 
-  saveCareEvent(workflow.event);
-  saveActionPlan(workflow.actionPlan);
-  workflow.tasks.forEach(saveCareTask);
-  if (!hasMatchingOpenFollowUp) {
-    saveFollowUp(workflow.followUp);
-  }
+  const events = [
+    workflow.event,
+    ...existingEvents.filter((event) => event.id !== workflow.event.id),
+  ].slice(0, COLLECTION_LIMITS.events);
+  const plans = [
+    workflow.actionPlan,
+    ...existingPlans.filter((plan) => plan.id !== workflow.actionPlan.id),
+  ].slice(0, COLLECTION_LIMITS.plans);
+  const workflowTaskIds = new Set(workflow.tasks.map((task) => task.id));
+  const tasks = [
+    ...workflow.tasks,
+    ...existingTasks.filter((task) => !workflowTaskIds.has(task.id)),
+  ].slice(0, COLLECTION_LIMITS.tasks);
+  const followUps = hasMatchingOpenFollowUp
+    ? existingFollowUps
+    : [workflow.followUp, ...existingFollowUps].slice(
+        0,
+        COLLECTION_LIMITS.followUps
+      );
+
+  writeLocal(KEYS.events, events);
+  writeLocal(KEYS.plans, plans);
+  writeLocal(KEYS.tasks, tasks);
+  writeLocal(KEYS.followUps, followUps);
   writeLocal(KEYS.latestWorkflow, workflow);
 }
 

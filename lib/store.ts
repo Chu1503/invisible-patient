@@ -1,3 +1,5 @@
+import { INPUT_LIMITS, sanitizePlainText, sanitizeSingleLine } from "./input";
+
 export type MentalState = "calm" | "restless" | "anxious" | "hopeful" | "tired" | "overwhelmed";
 export type RiskLevel = "low" | "moderate" | "high" | "crisis";
 
@@ -54,7 +56,16 @@ export function getProfile(): UserProfile | null {
 
 export function saveProfile(profile: UserProfile): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(KEYS.profile, JSON.stringify(profile));
+  localStorage.setItem(
+    KEYS.profile,
+    JSON.stringify({
+      ...profile,
+      username: sanitizeSingleLine(
+        profile.username,
+        INPUT_LIMITS.profileFieldChars
+      ),
+    })
+  );
 }
 
 export function ensureProfile(): UserProfile {
@@ -75,10 +86,21 @@ export function getCheckins(): CheckinEntry[] {
 export function saveCheckin(entry: CheckinEntry): void {
   if (typeof window === "undefined") return;
   const checkins = getCheckins();
-  const idx = checkins.findIndex((c) => c.id === entry.id);
-  if (idx >= 0) checkins[idx] = entry;
-  else checkins.push(entry);
-  localStorage.setItem(KEYS.checkins, JSON.stringify(checkins));
+  const safeEntry: CheckinEntry = {
+    ...entry,
+    messages: entry.messages.slice(-50).map((message) => ({
+      ...message,
+      content: sanitizePlainText(
+        message.content,
+        INPUT_LIMITS.chatMessageChars
+      ),
+    })),
+  };
+  const withoutCurrent = checkins.filter((checkin) => checkin.id !== entry.id);
+  const bounded = [...withoutCurrent, safeEntry]
+    .sort((a, b) => a.timestamp - b.timestamp)
+    .slice(-90);
+  localStorage.setItem(KEYS.checkins, JSON.stringify(bounded));
 }
 
 export function getLatestCheckin(): CheckinEntry | null {
@@ -114,7 +136,9 @@ export const AURA_COLORS: Record<MentalState, string> = {
 };
 
 export function generateId(): string {
-  return Math.random().toString(36).slice(2) + Date.now().toString(36);
+  return typeof crypto !== "undefined" && "randomUUID" in crypto
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2) + Date.now().toString(36);
 }
 
 export function getTodayDate(): string {

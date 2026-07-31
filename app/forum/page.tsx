@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Check, ChevronDown, Heart, MessageCircle } from "lucide-react";
 import Navbar from "@/components/Navbar";
+import { readApiError, requestChat } from "@/lib/chat-client";
+import { INPUT_LIMITS, sanitizePlainText } from "@/lib/input";
 import {
   CARE_STAGES,
   createPost,
@@ -42,13 +44,17 @@ export default function ForumPage() {
   const [aiLoading, setAiLoading] = useState<string | null>(null);
 
   useEffect(() => {
-    setPosts(getPosts());
-    setMyStage(getMyStage());
+    const timer = window.setTimeout(() => {
+      setPosts(getPosts());
+      setMyStage(getMyStage());
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   function submitPost() {
-    if (!newPost.trim()) return;
-    const post = createPost(newPost.trim(), myStage);
+    const content = sanitizePlainText(newPost, INPUT_LIMITS.forumPostChars);
+    if (!content) return;
+    const post = createPost(content, myStage);
     const updated = [post, ...posts];
     setPosts(updated);
     savePosts(updated);
@@ -60,8 +66,11 @@ export default function ForumPage() {
   }
 
   function submitReply(postId: string) {
-    if (!replyText.trim()) return;
-    const submittedText = replyText.trim();
+    const submittedText = sanitizePlainText(
+      replyText,
+      INPUT_LIMITS.forumReplyChars
+    );
+    if (!submittedText) return;
     const reply = createReply(submittedText);
     const updated = posts.map((post) =>
       post.id === postId
@@ -84,15 +93,15 @@ export default function ForumPage() {
   ) {
     setAiLoading(postId);
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      const response = await requestChat({
           messages: [{ role: "user", content: triggerText }],
           context: { riskLevel: "crisis", zbiAnswers: [], dominantThemes: [] },
-        }),
       });
-      if (!response.body) return;
+      if (!response.ok || !response.body) {
+        throw new Error(
+          await readApiError(response, "The support reply could not be loaded.")
+        );
+      }
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let full = "";
@@ -109,6 +118,8 @@ export default function ForumPage() {
       );
       setPosts(updated);
       savePosts(updated);
+    } catch {
+      // The caregiver's optimistic post or reply remains available locally.
     } finally {
       setAiLoading(null);
     }
@@ -174,6 +185,7 @@ export default function ForumPage() {
               onChange={(event) => setNewPost(event.target.value)}
               placeholder="Share what is on your mind"
               rows={3}
+              maxLength={INPUT_LIMITS.forumPostChars}
               className="circle-textarea"
             />
 
@@ -262,6 +274,7 @@ export default function ForumPage() {
                             onChange={(event) => setReplyText(event.target.value)}
                             placeholder="Write a response"
                             rows={2}
+                            maxLength={INPUT_LIMITS.forumReplyChars}
                           />
                           {detectCrisis(replyText) && CRISIS_RESOURCES}
                           <div>

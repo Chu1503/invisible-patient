@@ -23,7 +23,7 @@ I'm deeply concerned about what you just shared. Please reach out for immediate 
 
 You are not alone. These are real people ready to help right now.`;
 
-export function buildSystemPrompt(context?: {
+export interface ChatContext {
   zbiAnswers?: number[];
   riskLevel?: string;
   dominantThemes?: string[];
@@ -49,7 +49,9 @@ export function buildSystemPrompt(context?: {
     memoryNote?: string;
     immediateActions?: string[];
   } | null;
-}): string {
+}
+
+export function buildSystemPrompt(context?: ChatContext): string {
   const answeredCount = context?.zbiAnswers?.length ?? 0;
   const nextQuestion = answeredCount < 12 ? ZBI_QUESTIONS[answeredCount] : null;
 

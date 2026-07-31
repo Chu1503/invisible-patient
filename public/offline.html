@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#002828" />
+    <title>Invisible Patient is offline</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: Arial, Helvetica, sans-serif;
+        background: #f9faf7;
+        color: #002828;
+      }
+      body {
+        min-height: 100vh;
+        min-height: 100dvh;
+        margin: 0;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      main {
+        width: min(100%, 440px);
+        border: 1px solid rgba(0, 40, 40, 0.16);
+        border-radius: 28px;
+        padding: 32px;
+        background: #fffdf7;
+      }
+      i {
+        display: block;
+        width: 18px;
+        height: 18px;
+        border: 5px solid #ffd84d;
+        border-radius: 50%;
+        margin-bottom: 48px;
+      }
+      h1 {
+        margin: 0;
+        font-size: 32px;
+        letter-spacing: -0.04em;
+      }
+      p {
+        margin: 14px 0 24px;
+        color: rgba(0, 40, 40, 0.7);
+        line-height: 1.55;
+      }
+      button {
+        border: 0;
+        border-radius: 999px;
+        padding: 12px 18px;
+        background: #002828;
+        color: #f9faf7;
+        font: inherit;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <i aria-hidden="true"></i>
+      <h1>You are offline</h1>
+      <p>Your saved profile and check ins stay on this device. Reconnect to continue talking.</p>
+      <button type="button" onclick="location.reload()">Try again</button>
+    </main>
+  </body>
+</html>

@@ -1,3 +1,5 @@
+import { INPUT_LIMITS, sanitizePlainText, sanitizeSingleLine } from "./input";
+
 export interface ForumPost {
   id: string;
   content: string;
@@ -103,7 +105,18 @@ export function getPosts(): ForumPost[] {
 
 export function savePosts(posts: ForumPost[]): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem("ip_forum", JSON.stringify(posts));
+  const bounded = posts.slice(0, 100).map((post) => ({
+    ...post,
+    content: sanitizePlainText(post.content, INPUT_LIMITS.forumPostChars),
+    careStage: CARE_STAGES.includes(post.careStage)
+      ? post.careStage
+      : CARE_STAGES[0],
+    replies: post.replies.slice(-50).map((reply) => ({
+      ...reply,
+      content: sanitizePlainText(reply.content, INPUT_LIMITS.forumReplyChars),
+    })),
+  }));
+  localStorage.setItem("ip_forum", JSON.stringify(bounded));
 }
 
 export function getMyTag(): string {
@@ -123,16 +136,24 @@ export function getMyStage(): string {
 
 export function saveMyStage(stage: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem("ip_forum_stage", stage);
+  localStorage.setItem(
+    "ip_forum_stage",
+    CARE_STAGES.includes(stage) ? stage : CARE_STAGES[0]
+  );
 }
 
 export function createPost(content: string, stage: string): ForumPost {
   return {
-    id: Math.random().toString(36).slice(2) + Date.now().toString(36),
-    content,
+    id:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2) + Date.now().toString(36),
+    content: sanitizePlainText(content, INPUT_LIMITS.forumPostChars),
     timestamp: Date.now(),
     authorTag: getMyTag(),
-    careStage: stage,
+    careStage: CARE_STAGES.includes(stage)
+      ? sanitizeSingleLine(stage, 80)
+      : CARE_STAGES[0],
     hasCrisis: detectCrisis(content),
     replies: [],
   };
@@ -140,8 +161,11 @@ export function createPost(content: string, stage: string): ForumPost {
 
 export function createReply(content: string, isAI = false): ForumReply {
   return {
-    id: Math.random().toString(36).slice(2) + Date.now().toString(36),
-    content,
+    id:
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : Math.random().toString(36).slice(2) + Date.now().toString(36),
+    content: sanitizePlainText(content, INPUT_LIMITS.forumReplyChars),
     timestamp: Date.now(),
     authorTag: isAI ? "AI Companion" : getMyTag(),
     isAI,
