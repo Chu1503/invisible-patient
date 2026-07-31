@@ -41,7 +41,7 @@ for (const directory of ["app", "components", "hooks", "lib", "public"]) {
     filter(sourcePath) {
       return ![
         path.join(root, "app", "api"),
-        path.join(root, "app", "auth"),
+        path.join(root, "app", "auth", "callback"),
       ].some((excludedPath) => sourcePath.startsWith(excludedPath));
     },
   });

@@ -11,6 +11,11 @@ const ignoredDirectories = new Set([
   "out",
   "build",
 ]);
+const ignoredPathPrefixes = [
+  ".capacitor-build/",
+  "android/app/src/main/assets/public/",
+  "artifacts/",
+];
 const ignoredExtensions = new Set([
   ".ico",
   ".png",
@@ -53,6 +58,9 @@ function walk(directory) {
 const findings = [];
 for (const file of walk(root)) {
   const relativePath = relative(root, file).replaceAll("\\", "/");
+  if (ignoredPathPrefixes.some((prefix) => relativePath.startsWith(prefix))) {
+    continue;
+  }
   const extension = extname(file).toLowerCase();
   if (ignoredExtensions.has(extension)) continue;
   if (/^\.env(?:\.|$)/.test(relativePath) && relativePath !== ".env.example") {

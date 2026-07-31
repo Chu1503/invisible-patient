@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from "next";
+import NativeAuthBridge from "@/components/NativeAuthBridge";
 import PwaInstallPrompt from "@/components/PwaInstallPrompt";
 import AccountDataGate from "@/components/AccountDataGate";
 import RouteScrollReset from "@/components/RouteScrollReset";
@@ -49,6 +50,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <TaskReminderManager />
           {children}
         </AccountDataGate>
+        <NativeAuthBridge />
         <PwaInstallPrompt />
       </body>
     </html>

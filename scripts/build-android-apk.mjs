@@ -24,7 +24,7 @@ if (!npmCli) {
 }
 run(process.execPath, [npmCli, "run", "mobile:web"]);
 run(process.execPath, [
-  path.join(root, "node_modules", "@capacitor", "cli", "dist", "index.js"),
+  path.join(root, "node_modules", "@capacitor", "cli", "bin", "capacitor"),
   "sync",
   "android",
 ]);

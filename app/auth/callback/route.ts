@@ -1,5 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { consumeRateLimit, rateLimitHeaders } from "@/lib/api-security";
+import { getRateLimitSettings } from "@/lib/server-env";
 import { getSupabaseConfig } from "@/lib/supabase/config";
 
 function safeNextPath(value: string | null): string {
@@ -7,10 +9,33 @@ function safeNextPath(value: string | null): string {
 }
 
 export async function GET(request: NextRequest) {
+  const settings = getRateLimitSettings();
+  const rateLimit = consumeRateLimit(
+    request,
+    "auth:callback",
+    settings.loginAttempts,
+    settings.windowMs
+  );
+  if (!rateLimit.allowed) {
+    return NextResponse.json(
+      { error: "Too many sign in attempts. Please wait before trying again." },
+      {
+        status: 429,
+        headers: {
+          "Cache-Control": "private, no-store",
+          ...rateLimitHeaders(rateLimit),
+        },
+      }
+    );
+  }
+
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
   const next = safeNextPath(requestUrl.searchParams.get("next"));
   const response = NextResponse.redirect(new URL(next, request.url));
+  Object.entries(rateLimitHeaders(rateLimit)).forEach(([name, value]) =>
+    response.headers.set(name, String(value))
+  );
 
   if (!code) {
     const errorUrl = new URL("/auth", request.url);

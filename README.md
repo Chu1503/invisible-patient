@@ -136,8 +136,8 @@ Do not use a `NEXT_PUBLIC_` prefix for secrets.
 
 Optional environment variables control the Claude model, output length,
 timeouts, retries, request limits, and token budget. The default API window is
-15 minutes. `LOGIN_RATE_LIMIT_MAX` is fixed at five by default and should be
-used by the login route when authentication is added.
+15 minutes. The web login callback and browser sign in control allow five
+attempts per window by default through `LOGIN_RATE_LIMIT_MAX`.
 
 The current API limiter is process-local. Before running multiple production
 instances, back the same limits with a shared store such as Redis or platform
@@ -157,8 +157,9 @@ worker, and an install guide. Android browsers can show the native install
 prompt. On iPhone or iPad, open the site in Safari, tap Share, and choose
 **Add to Home Screen**. The deployed website must use HTTPS.
 
-The service worker never caches API responses or conversations. Profile,
-check-in, and care context data continue to use device-local storage.
+The service worker never caches API responses or conversations. Authenticated
+profile, check-in, task, and care context data continue to use Supabase with
+Row Level Security.
 
 ## Android app
 
@@ -172,6 +173,15 @@ Add the deployed HTTPS origin to `.env.local`:
 ```env
 MOBILE_API_BASE_URL=https://your-production-domain.example
 ```
+
+In Supabase Authentication URL Configuration, add this exact native redirect:
+
+```text
+com.chu1503.invisiblepatient://auth/callback
+```
+
+The APK opens Google sign in in the system browser and returns through that
+deep link. Keep the website callback URL configured as well.
 
 Then build a debug APK:
 

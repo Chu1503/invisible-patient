@@ -42,6 +42,8 @@ In **Authentication → URL Configuration**:
 - Site URL: `https://invisible-patient.vercel.app`
 - Add redirect URL:
   `https://invisible-patient.vercel.app/auth/callback`
+- Add the Android app redirect URL:
+  `com.chu1503.invisiblepatient://auth/callback`
 - For local development, also add:
   `http://localhost:3000/auth/callback`
 

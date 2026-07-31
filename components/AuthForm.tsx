@@ -1,8 +1,43 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Browser } from "@capacitor/browser";
+import { Capacitor } from "@capacitor/core";
+import { INPUT_LIMITS, sanitizePlainText } from "@/lib/input";
+import { NATIVE_AUTH_CALLBACK_URL } from "@/lib/native-auth";
 import { createClient } from "@/lib/supabase/client";
 import { isSupabaseConfigured } from "@/lib/supabase/config";
+
+const AUTH_ATTEMPTS_KEY = "ip_auth_attempts";
+const AUTH_ATTEMPT_LIMIT = 5;
+const AUTH_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
+
+function recordAuthAttempt(): boolean {
+  const now = Date.now();
+  let attempts: number[] = [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(AUTH_ATTEMPTS_KEY) ?? "[]");
+    if (Array.isArray(parsed)) {
+      attempts = parsed.filter(
+        (value): value is number =>
+          typeof value === "number" &&
+          Number.isFinite(value) &&
+          value > now - AUTH_ATTEMPT_WINDOW_MS
+      );
+    }
+  } catch {
+    attempts = [];
+  }
+
+  if (attempts.length >= AUTH_ATTEMPT_LIMIT) return false;
+  attempts.push(now);
+  try {
+    localStorage.setItem(AUTH_ATTEMPTS_KEY, JSON.stringify(attempts));
+  } catch {
+    // Browser privacy settings should not block account access.
+  }
+  return true;
+}
 
 function GoogleMark() {
   return (
@@ -42,12 +77,34 @@ export default function AuthForm({
 }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(initialError);
+  const [missingConfiguration, setMissingConfiguration] = useState(
+    configurationMissing
+  );
   const submissionInFlight = useRef(false);
 
-  const unavailable = configurationMissing || !isSupabaseConfigured();
+  const unavailable = missingConfiguration || !isSupabaseConfigured();
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const queryError = sanitizePlainText(
+        params.get("error") ?? "",
+        INPUT_LIMITS.profileFieldChars
+      );
+      if (queryError) setMessage(queryError);
+      if (params.get("configuration") === "missing") {
+        setMissingConfiguration(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
   async function continueWithGoogle() {
     if (unavailable || submissionInFlight.current) return;
+    if (!recordAuthAttempt()) {
+      setMessage("Too many sign in attempts. Please try again in 15 minutes.");
+      return;
+    }
 
     submissionInFlight.current = true;
     setLoading(true);
@@ -57,7 +114,9 @@ export default function AuthForm({
       const { data, error } = await createClient().auth.signInWithOAuth({
         provider: "google",
         options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
+          redirectTo: Capacitor.isNativePlatform()
+            ? NATIVE_AUTH_CALLBACK_URL
+            : `${window.location.origin}/auth/callback`,
           skipBrowserRedirect: true,
         },
       });
@@ -67,7 +126,11 @@ export default function AuthForm({
         return;
       }
 
-      window.location.assign(data.url);
+      if (Capacitor.isNativePlatform()) {
+        await Browser.open({ url: data.url });
+      } else {
+        window.location.assign(data.url);
+      }
     } catch {
       setMessage(
         "We could not reach the account service. Check your connection and try again."

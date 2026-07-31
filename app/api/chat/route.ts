@@ -51,12 +51,6 @@ function jsonError(
 async function hasAuthenticatedAccount(request: Request): Promise<boolean> {
   if (!isSupabaseConfigured()) return true;
 
-  const origin = request.headers.get("origin");
-  const isInstalledApp =
-    Boolean(origin && getAllowedAppOrigins().includes(origin)) &&
-    request.headers.get("user-agent")?.includes("InvisiblePatient/");
-  if (isInstalledApp) return true;
-
   const authorization = request.headers.get("authorization");
   const jwt = authorization?.startsWith("Bearer ")
     ? authorization.slice("Bearer ".length).trim()
