@@ -24,9 +24,9 @@ export default function HomePage() {
   }, []);
 
   return (
-    <main className="ip-page min-h-screen">
+    <main className="ip-home-page">
       <Navbar />
-      <div className="mx-auto flex min-h-[calc(100dvh-168px)] max-w-6xl items-center justify-center px-4">
+      <div className="ip-home-stage">
         <div className="ip-home-shell">
           <section
             className="ip-home-hero"
