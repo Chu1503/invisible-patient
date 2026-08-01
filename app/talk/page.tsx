@@ -65,6 +65,7 @@ export default function TalkPage() {
   const [requestError, setRequestError] = useState("");
 
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -77,7 +78,10 @@ export default function TalkPage() {
 
   useEffect(() => {
     if (messages.length === 1 && pendingZbiQ < 0) return;
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+
+    scroller.scrollTo({ top: scroller.scrollHeight, behavior: "smooth" });
   }, [messages, pendingZbiQ]);
 
   const canSend =
@@ -258,7 +262,7 @@ export default function TalkPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#090d15] flex flex-col">
+    <main className="talk-page-shell bg-[#090d15] flex flex-col">
       <Navbar />
 
       <div className="talk-progress">
@@ -284,8 +288,8 @@ export default function TalkPage() {
         )}
       </div>
 
-      <div className="mx-auto flex min-h-screen w-full max-w-4xl flex-col px-4 pb-44 pt-28 max-[700px]:pt-20">
-        <div className="flex-1 flex flex-col gap-4 py-4">
+      <div ref={scrollRef} data-route-scroll className="talk-scroll-region">
+        <div className="talk-message-list">
           {messages.map((msg) => {
             const { clean, qIndex } = parseZbiTag(msg.content);
             const isActiveZbiMsg =

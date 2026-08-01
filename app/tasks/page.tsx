@@ -479,9 +479,6 @@ export default function TasksPage() {
           </section>
         )}
 
-        <p className="tasks-safety-note">
-          Care tasks are not emergency alerts or medical instructions.
-        </p>
       </div>
     </main>
   );

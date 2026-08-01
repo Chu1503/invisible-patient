@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Mic, MicOff, X, Volume2 } from "lucide-react";
+import { Capacitor, type PluginListenerHandle } from "@capacitor/core";
+import { SpeechRecognition } from "@capgo/capacitor-speech-recognition";
 import { analyzeConversation } from "@/lib/analysis";
 import { readApiError, requestChat } from "@/lib/chat-client";
 import { INPUT_LIMITS, sanitizePlainText } from "@/lib/input";
@@ -93,6 +95,8 @@ export default function VoicePage() {
   );
 
   const [mounted, setMounted] = useState(false);
+  const [supportChecked, setSupportChecked] = useState(false);
+  const [nativePlatform, setNativePlatform] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [messages, setMessages] = useState<Message[]>([initialMessage]);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
@@ -108,19 +112,41 @@ export default function VoicePage() {
   const [requestError, setRequestError] = useState("");
 
   const recognitionRef = useRef<VoiceRecognition | null>(null);
+  const nativeRecognitionRef = useRef(false);
+  const nativeListenersRef = useRef<PluginListenerHandle[]>([]);
   const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
   const finalTranscriptRef = useRef("");
   const isProcessingRef = useRef(false);
 
   useEffect(() => {
+    let active = true;
     const timer = window.setTimeout(() => {
       setMounted(true);
-      const voiceWindow = window as VoiceWindow;
-      const hasRecognition = !!(
-        voiceWindow.SpeechRecognition || voiceWindow.webkitSpeechRecognition
-      );
-      const hasSynthesis = !!window.speechSynthesis;
-      setVoiceSupported(hasRecognition && hasSynthesis);
+      nativeRecognitionRef.current = Capacitor.isNativePlatform();
+      setNativePlatform(nativeRecognitionRef.current);
+
+      if (nativeRecognitionRef.current) {
+        void SpeechRecognition.available()
+          .then(({ available }) => {
+            if (active) {
+              setVoiceSupported(available);
+              setSupportChecked(true);
+            }
+          })
+          .catch(() => {
+            if (active) {
+              setVoiceSupported(false);
+              setSupportChecked(true);
+            }
+          });
+      } else {
+        const voiceWindow = window as VoiceWindow;
+        const hasRecognition = !!(
+          voiceWindow.SpeechRecognition || voiceWindow.webkitSpeechRecognition
+        );
+        setVoiceSupported(hasRecognition);
+        setSupportChecked(true);
+      }
       setMessages([
         {
           id: "init",
@@ -134,10 +160,19 @@ export default function VoicePage() {
     }, 0);
 
     return () => {
+      active = false;
       window.clearTimeout(timer);
       try {
         recognitionRef.current?.abort();
       } catch {}
+      if (nativeRecognitionRef.current) {
+        void SpeechRecognition.setPTTState({ held: false }).catch(() => undefined);
+        void SpeechRecognition.forceStop({ timeout: 600 }).catch(() => undefined);
+        for (const listener of nativeListenersRef.current) {
+          void listener.remove();
+        }
+        nativeListenersRef.current = [];
+      }
       if (typeof window !== "undefined" && window.speechSynthesis) {
         window.speechSynthesis.cancel();
       }
@@ -236,10 +271,107 @@ export default function VoicePage() {
     setVoiceState("idle");
   }
 
+  async function clearNativeListeners() {
+    const listeners = nativeListenersRef.current;
+    nativeListenersRef.current = [];
+    await Promise.all(listeners.map((listener) => listener.remove().catch(() => undefined)));
+  }
+
+  async function startNativeListening() {
+    setRequestError("");
+
+    try {
+      let permission = await SpeechRecognition.checkPermissions();
+      if (permission.speechRecognition !== "granted") {
+        permission = await SpeechRecognition.requestPermissions();
+      }
+
+      if (permission.speechRecognition !== "granted") {
+        setRequestError(
+          "Microphone permission is needed for voice input. Enable it in Android Settings, then try again."
+        );
+        setVoiceState("idle");
+        return;
+      }
+
+      const { available } = await SpeechRecognition.available();
+      if (!available) {
+        setVoiceSupported(false);
+        setRequestError("Voice input is not supported on this device.");
+        return;
+      }
+
+      await SpeechRecognition.setPTTState({ held: false }).catch(() => undefined);
+      await SpeechRecognition.forceStop({ timeout: 500 }).catch(() => undefined);
+      await clearNativeListeners();
+
+      finalTranscriptRef.current = "";
+      setTranscript("");
+
+      const partialListener = await SpeechRecognition.addListener(
+        "partialResults",
+        (event) => {
+          const current = (
+            event.accumulatedText ||
+            event.matches?.[0] ||
+            event.accumulated ||
+            ""
+          ).trim();
+          if (!current) return;
+          finalTranscriptRef.current = current;
+          setTranscript(current);
+        }
+      );
+      const stateListener = await SpeechRecognition.addListener(
+        "listeningState",
+        (event) => {
+          if (event.state === "started" || event.status === "started") {
+            setVoiceState("listening");
+          }
+        }
+      );
+      const errorListener = await SpeechRecognition.addListener(
+        "error",
+        (event) => {
+          if (event.code === "ERROR_NO_MATCH" || event.code === "ERROR_SPEECH_TIMEOUT") {
+            return;
+          }
+          setVoiceState("idle");
+          setRequestError("Voice input stopped unexpectedly. Please try again.");
+        }
+      );
+      nativeListenersRef.current = [partialListener, stateListener, errorListener];
+
+      setVoiceState("listening");
+      await SpeechRecognition.setPTTState({ held: true, mute: true });
+      await SpeechRecognition.start({
+        language: "en-US",
+        maxResults: 1,
+        popup: false,
+        partialResults: true,
+        continuousPTT: true,
+        allowForSilence: 1800,
+        muteRecognizerBeep: true,
+        useOnDeviceRecognition: false,
+      });
+    } catch {
+      await SpeechRecognition.setPTTState({ held: false }).catch(() => undefined);
+      await SpeechRecognition.forceStop({ timeout: 500 }).catch(() => undefined);
+      await clearNativeListeners();
+      setVoiceState("idle");
+      setRequestError("Voice input could not start. Please check microphone access and try again.");
+    }
+  }
+
   function startListening() {
     if (typeof window === "undefined") return;
     if (voiceState === "thinking") return;
     if (isProcessingRef.current) return;
+
+    if (nativeRecognitionRef.current) {
+      void startNativeListening();
+      return;
+    }
 
     const voiceWindow = window as VoiceWindow;
     const SpeechRecognitionAPI =
@@ -302,7 +434,34 @@ export default function VoicePage() {
     recognition.start();
   }
 
+  async function stopNativeListeningAndSubmit() {
+    let cachedText = finalTranscriptRef.current.trim();
+
+    try {
+      await SpeechRecognition.setPTTState({ held: false });
+      const last = await SpeechRecognition.getLastPartialResult().catch(() => null);
+      await SpeechRecognition.forceStop({ timeout: 700 });
+      cachedText =
+        finalTranscriptRef.current.trim() ||
+        last?.text?.trim() ||
+        last?.matches?.[0]?.trim() ||
+        cachedText;
+    } finally {
+      await clearNativeListeners();
+      setVoiceState("idle");
+    }
+
+    if (cachedText) {
+      void handleFinalTranscript(cachedText);
+    }
+  }
+
   function stopListeningAndSubmit() {
+    if (nativeRecognitionRef.current) {
+      void stopNativeListeningAndSubmit();
+      return;
+    }
+
     if (!recognitionRef.current) return;
 
     const finalText = transcript.trim();
@@ -505,14 +664,20 @@ export default function VoicePage() {
   const canStopTalking = voiceState === "listening";
 
   return (
-    <main className="min-h-screen bg-[#090d15] flex flex-col items-center justify-between gap-4 px-4 py-5 relative">
+    <main className="voice-page bg-[#090d15] flex flex-col items-center justify-between gap-4 px-4 py-5 relative">
       <div className="voice-header ip-panel flex items-center justify-between">
         <button
           onClick={() => {
             stopSpeaking();
-            try {
-              recognitionRef.current?.abort();
-            } catch {}
+            if (nativeRecognitionRef.current) {
+              void SpeechRecognition.setPTTState({ held: false }).catch(() => undefined);
+              void SpeechRecognition.forceStop({ timeout: 600 }).catch(() => undefined);
+              void clearNativeListeners();
+            } else {
+              try {
+                recognitionRef.current?.abort();
+              } catch {}
+            }
             router.push("/talk");
           }}
           className="flex items-center gap-2 text-[#A09890] hover:text-[#D4CEBD] transition-colors text-sm"
@@ -539,10 +704,12 @@ export default function VoicePage() {
       </div>
 
       <div className="voice-content flex flex-1 flex-col items-center justify-center gap-6 py-6">
-        {!voiceSupported && mounted ? (
+        {supportChecked && !voiceSupported && mounted ? (
           <div className="text-center px-4">
             <p className="text-[#D4CEBD] text-base leading-relaxed">
-              Voice input is not available in this browser. Use Chrome for the best results.
+              {nativePlatform
+                ? "Voice input is not supported on this device."
+                : "Voice input is not available in this browser. Use Chrome for the best results."}
             </p>
           </div>
         ) : (
@@ -679,7 +846,11 @@ export default function VoicePage() {
 
         <p className="text-xs text-[#A09890] text-center">
           {!voiceSupported
-            ? "Voice input unavailable in this browser"
+            ? !supportChecked
+              ? "Checking voice input"
+              : nativePlatform
+              ? "Voice input unavailable on this device"
+              : "Voice input unavailable in this browser"
             : ratingRequired
             ? "Choose a rating first, then start talking"
             : voiceState === "idle"

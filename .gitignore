@@ -61,6 +61,14 @@ yarn-error.log*
 *.swo
 *~
 
+# Local AI assistants and agent workspaces
+/.claude/
+/.agents/
+/.codex/
+
+# GitHub-only automation is not required by the app or Vercel
+/.github/
+
 # Operating-system files
 .DS_Store
 ._*

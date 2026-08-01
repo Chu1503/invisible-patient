@@ -17,6 +17,8 @@ export default function NativeAuthBridge() {
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) return;
 
+    document.documentElement.classList.add("is-native-app");
+
     let active = true;
     let handlingCallback = false;
 
@@ -71,6 +73,7 @@ export default function NativeAuthBridge() {
 
     return () => {
       active = false;
+      document.documentElement.classList.remove("is-native-app");
       void removeListener?.();
     };
   }, []);
