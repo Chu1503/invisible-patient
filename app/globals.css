@@ -592,10 +592,10 @@ select:focus-visible {
 }
 
 .ip-brand-mark {
-  width: 12px;
-  height: 12px;
-  border: 3px solid var(--ip-yellow);
-  border-radius: 999px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  background: url("/invisible-patient-logo.png") center / contain no-repeat;
 }
 
 .ip-nav-links {
@@ -2626,10 +2626,6 @@ select:focus-visible {
 
 .setup-header .auth-brand {
   color: var(--ip-ink);
-}
-
-.setup-header .ip-brand-mark {
-  border-color: var(--ip-yellow-ink);
 }
 
 .setup-header > p {

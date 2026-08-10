@@ -1,4 +1,4 @@
-const VERSION = "ip-shell-v1";
+const VERSION = "ip-shell-v2";
 const OFFLINE_URL = "/offline.html";
 const CORE_ASSETS = [
   "/",
@@ -6,6 +6,7 @@ const CORE_ASSETS = [
   "/manifest.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
+  "/invisible-patient-logo.png",
 ];
 
 self.addEventListener("install", (event) => {
@@ -51,6 +52,7 @@ self.addEventListener("fetch", (event) => {
   if (
     url.pathname.startsWith("/_next/static/") ||
     url.pathname.startsWith("/icons/") ||
+    url.pathname === "/invisible-patient-logo.png" ||
     request.destination === "font"
   ) {
     event.respondWith(

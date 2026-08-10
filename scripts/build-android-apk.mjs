@@ -56,6 +56,6 @@ await stat(source);
 
 const artifacts = path.join(root, "artifacts");
 await mkdir(artifacts, { recursive: true });
-const destination = path.join(artifacts, "invisible-patient-debug.apk");
+const destination = path.join(artifacts, "the-invisible-patient.apk");
 await copyFile(source, destination);
 console.log(`APK created at ${destination}`);
