@@ -18,12 +18,11 @@ const androidResDir = path.join(
 // dark green backdrop, yellow body, and local halo glow.
 const sourcePath = path.join(assetsDir, "logo-master.png");
 const ink = "#042A2F";
-// Android adaptive icons are 108dp square, but only the centered 66dp safe
-// zone is guaranteed not to be clipped by a launcher mask. Scaling this master
-// to 92% keeps its ~58% tall artwork within ~53.4% of the full layer, or about
-// 57.7dp, leaving roughly 4dp of reserve inside the official safe zone.
-const adaptiveIconScale = 0.92;
-const launcherIconScale = 0.96;
+// The widest lower torso corner is 39.015dp from the master center at full
+// size. A circular launcher mask has a 33dp radius, so an 83px mark on a
+// 108dp adaptive canvas gives it a 30dp radius and a 3dp clear margin.
+const adaptiveIconScale = 83 / 108;
+const launcherIconScale = 0.78;
 const adaptiveCanvasSizes = {
   ldpi: 81,
   mdpi: 108,
