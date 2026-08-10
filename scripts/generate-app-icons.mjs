@@ -15,8 +15,9 @@ const androidResDir = path.join(
   "res"
 );
 const sourcePath = path.join(assetsDir, "logo-source.png");
-const paper = "#F9FAF7";
-const ink = "#002828";
+// This is the exact flat body color sampled from logo-source.png. Matching the
+// surrounding canvas lets the body blend into Android's adaptive icon safely.
+const ink = "#042A2F";
 
 await Promise.all([
   mkdir(appDir, { recursive: true }),
@@ -28,8 +29,11 @@ const trimmed = await sharp(sourcePath)
   .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 } })
   .png()
   .toBuffer({ resolveWithObject: true });
+// Android can apply circular, rounded-square, or OEM-specific masks. Leave
+// generous transparent breathing room around the original artwork so none of
+// its ring is clipped after an adaptive mask is applied.
 const cropMargin = Math.round(
-  Math.max(trimmed.info.width, trimmed.info.height) * 0.06
+  Math.max(trimmed.info.width, trimmed.info.height) * 0.17
 );
 const cropSize =
   Math.max(trimmed.info.width, trimmed.info.height) + cropMargin * 2;
@@ -61,8 +65,8 @@ async function resizedMark(size) {
 
 async function squareIcon(size, options = {}) {
   const {
-    background = paper,
-    markScale = 0.94,
+    background = ink,
+    markScale = 0.82,
     transparent = false,
   } = options;
   const markSize = Math.max(1, Math.round(size * markScale));
@@ -131,7 +135,7 @@ async function walk(directory) {
 const icon192 = await squareIcon(192);
 const icon512 = await squareIcon(512);
 const appleIcon = await squareIcon(180);
-const maskableIcon = await squareIcon(512, { markScale: 0.76 });
+const maskableIcon = await squareIcon(512, { markScale: 0.64 });
 const faviconPng = await squareIcon(256);
 
 await Promise.all([
@@ -147,7 +151,7 @@ await Promise.all([
   writeFile(path.join(assetsDir, "icon-only.png"), await squareIcon(1024)),
   writeFile(
     path.join(assetsDir, "icon-foreground.png"),
-    await squareIcon(1024, { markScale: 0.72, transparent: true })
+    await squareIcon(1024, { markScale: 0.64, transparent: true })
   ),
   writeFile(
     path.join(assetsDir, "icon-background.png"),
@@ -156,13 +160,13 @@ await Promise.all([
         width: 1024,
         height: 1024,
         channels: 4,
-        background: paper,
+        background: ink,
       },
     })
       .png()
       .toBuffer()
   ),
-  writeFile(path.join(assetsDir, "splash.png"), await splash(2732, 2732, paper)),
+  writeFile(path.join(assetsDir, "splash.png"), await splash(2732, 2732, ink)),
   writeFile(
     path.join(assetsDir, "splash-dark.png"),
     await splash(2732, 2732, ink)
@@ -182,14 +186,13 @@ await Promise.all(
 
     const name = path.basename(file).toLowerCase();
     if (name === "splash.png") {
-      const background = file.toLowerCase().includes("night") ? ink : paper;
-      await writeFile(file, await splash(width, height, background));
+      await writeFile(file, await splash(width, height, ink));
       return;
     }
 
     if (name === "ic_launcher_background.png") {
       await sharp({
-        create: { width, height, channels: 4, background: paper },
+        create: { width, height, channels: 4, background: ink },
       })
         .png()
         .toFile(file);
@@ -199,7 +202,7 @@ await Promise.all(
     if (name === "ic_launcher_foreground.png") {
       await writeFile(
         file,
-        await squareIcon(width, { markScale: 0.72, transparent: true })
+        await squareIcon(width, { markScale: 0.64, transparent: true })
       );
       return;
     }
