@@ -78,3 +78,10 @@ $RECYCLE.BIN/
 
 # Local reference artifacts
 /TIP/
+
+# Local project documentation
+/README.md
+/SUPABASE_SETUP.md
+/PERFORMANCE_AUDIT.md
+/YC_CIRCLE_DEMO_CONTENT.md
+/YC_LAUNCH_CHECKLIST.md
