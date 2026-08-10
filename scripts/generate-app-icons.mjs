@@ -18,6 +18,20 @@ const androidResDir = path.join(
 // dark green backdrop, yellow body, and local halo glow.
 const sourcePath = path.join(assetsDir, "logo-master.png");
 const ink = "#042A2F";
+// Android adaptive icons are 108dp square, but only the centered 66dp safe
+// zone is guaranteed not to be clipped by a launcher mask. Scaling this master
+// to 92% keeps its ~58% tall artwork within ~53.4% of the full layer, or about
+// 57.7dp, leaving roughly 4dp of reserve inside the official safe zone.
+const adaptiveIconScale = 0.92;
+const launcherIconScale = 0.96;
+const adaptiveCanvasSizes = {
+  ldpi: 81,
+  mdpi: 108,
+  hdpi: 162,
+  xhdpi: 216,
+  xxhdpi: 324,
+  xxxhdpi: 432,
+};
 
 await Promise.all([
   mkdir(appDir, { recursive: true }),
@@ -106,6 +120,11 @@ async function walk(directory) {
   return files;
 }
 
+function adaptiveCanvasSize(filePath, fallback) {
+  const qualifier = path.basename(path.dirname(filePath)).match(/^mipmap-(.+)$/)?.[1];
+  return (qualifier && adaptiveCanvasSizes[qualifier]) || fallback;
+}
+
 const icon192 = await squareIcon(192);
 const icon512 = await squareIcon(512);
 const appleIcon = await squareIcon(180);
@@ -174,14 +193,15 @@ await Promise.all(
     }
 
     if (name === "ic_launcher_foreground.png") {
+      const canvas = adaptiveCanvasSize(file, width);
       await writeFile(
         file,
-        await squareIcon(width)
+        await squareIcon(canvas, { markScale: adaptiveIconScale })
       );
       return;
     }
 
-    await writeFile(file, await squareIcon(width));
+    await writeFile(file, await squareIcon(width, { markScale: launcherIconScale }));
   })
 );
 

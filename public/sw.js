@@ -1,4 +1,4 @@
-const VERSION = "ip-shell-v3";
+const VERSION = "ip-shell-v4";
 const OFFLINE_URL = "/offline.html";
 const CORE_ASSETS = [
   "/",
