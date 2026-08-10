@@ -14,9 +14,9 @@ const androidResDir = path.join(
   "main",
   "res"
 );
-const sourcePath = path.join(assetsDir, "logo-source.png");
-// This is the exact flat body color sampled from logo-source.png. Matching the
-// surrounding canvas lets the body blend into Android's adaptive icon safely.
+// This full-canvas master is generated at high resolution and includes its own
+// dark green backdrop, yellow body, and local halo glow.
+const sourcePath = path.join(assetsDir, "logo-master.png");
 const ink = "#042A2F";
 
 await Promise.all([
@@ -25,34 +25,8 @@ await Promise.all([
   mkdir(assetsDir, { recursive: true }),
 ]);
 
-const trimmed = await sharp(sourcePath)
-  .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 } })
-  .png()
-  .toBuffer({ resolveWithObject: true });
-// Android can apply circular, rounded-square, or OEM-specific masks. Leave
-// generous transparent breathing room around the original artwork so none of
-// its ring is clipped after an adaptive mask is applied.
-const cropMargin = Math.round(
-  Math.max(trimmed.info.width, trimmed.info.height) * 0.17
-);
-const cropSize =
-  Math.max(trimmed.info.width, trimmed.info.height) + cropMargin * 2;
-const horizontalSpace = cropSize - trimmed.info.width;
-const verticalSpace = cropSize - trimmed.info.height;
-
-const squaredMark = await sharp(trimmed.data)
-  .extend({
-    left: Math.floor(horizontalSpace / 2),
-    right: Math.ceil(horizontalSpace / 2),
-    top: Math.floor(verticalSpace / 2),
-    bottom: Math.ceil(verticalSpace / 2),
-    background: { r: 0, g: 0, b: 0, alpha: 0 },
-  })
-  .png()
-  .toBuffer();
-
-const canonicalMark = await sharp(squaredMark)
-  .resize(1024, 1024, { fit: "fill" })
+const canonicalMark = await sharp(sourcePath)
+  .resize(1024, 1024, { fit: "cover", position: "centre" })
   .png()
   .toBuffer();
 
@@ -66,7 +40,7 @@ async function resizedMark(size) {
 async function squareIcon(size, options = {}) {
   const {
     background = ink,
-    markScale = 0.82,
+    markScale = 1,
     transparent = false,
   } = options;
   const markSize = Math.max(1, Math.round(size * markScale));
@@ -135,7 +109,7 @@ async function walk(directory) {
 const icon192 = await squareIcon(192);
 const icon512 = await squareIcon(512);
 const appleIcon = await squareIcon(180);
-const maskableIcon = await squareIcon(512, { markScale: 0.64 });
+const maskableIcon = await squareIcon(512);
 const faviconPng = await squareIcon(256);
 
 await Promise.all([
@@ -151,7 +125,7 @@ await Promise.all([
   writeFile(path.join(assetsDir, "icon-only.png"), await squareIcon(1024)),
   writeFile(
     path.join(assetsDir, "icon-foreground.png"),
-    await squareIcon(1024, { markScale: 0.64, transparent: true })
+    await squareIcon(1024)
   ),
   writeFile(
     path.join(assetsDir, "icon-background.png"),
@@ -202,7 +176,7 @@ await Promise.all(
     if (name === "ic_launcher_foreground.png") {
       await writeFile(
         file,
-        await squareIcon(width, { markScale: 0.64, transparent: true })
+        await squareIcon(width)
       );
       return;
     }
