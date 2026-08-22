@@ -12,6 +12,7 @@ import {
   MapPin,
   Pencil,
   Save,
+  Trash2,
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import {
@@ -519,6 +520,17 @@ export default function ProfilePage() {
             )}
           </section>
         </div>
+
+        <section className="profile-delete-account">
+          <div>
+            <h2>Delete your account</h2>
+            <p>Permanently remove your account and all associated data.</p>
+          </div>
+          <Link href="/delete-account" className="profile-delete-account-link">
+            <Trash2 size={15} />
+            Delete account
+          </Link>
+        </section>
 
         <nav className="profile-legal-links" aria-label="Legal">
           <Link href="/privacy">Privacy Policy</Link>

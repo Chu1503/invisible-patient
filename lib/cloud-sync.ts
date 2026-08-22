@@ -27,6 +27,9 @@ const ACCOUNT_KEYS = [
   "ip_follow_ups",
   "ip_latest_workflow",
   "ip_cache_user_id",
+  "ip_task_reminders_enabled",
+  "ip_task_reminders_shown",
+  "ip_task_reminders_snoozed",
 ];
 
 function iso(timestamp?: number): string | null {

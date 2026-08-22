@@ -77,6 +77,7 @@ export default function AuthForm({
 }) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState(initialError);
+  const [messageIsError, setMessageIsError] = useState(Boolean(initialError));
   const [missingConfiguration, setMissingConfiguration] = useState(
     configurationMissing
   );
@@ -91,9 +92,16 @@ export default function AuthForm({
         params.get("error") ?? "",
         INPUT_LIMITS.profileFieldChars
       );
-      if (queryError) setMessage(queryError);
+      if (queryError) {
+        setMessage(queryError);
+        setMessageIsError(true);
+      }
       if (params.get("configuration") === "missing") {
         setMissingConfiguration(true);
+      }
+      if (params.get("deleted") === "1") {
+        setMessage("Your account and its associated data were deleted.");
+        setMessageIsError(false);
       }
     }, 0);
     return () => window.clearTimeout(timer);
@@ -103,12 +111,14 @@ export default function AuthForm({
     if (unavailable || submissionInFlight.current) return;
     if (!recordAuthAttempt()) {
       setMessage("Too many sign in attempts. Please try again in 15 minutes.");
+      setMessageIsError(true);
       return;
     }
 
     submissionInFlight.current = true;
     setLoading(true);
     setMessage("");
+    setMessageIsError(false);
 
     try {
       const { data, error } = await createClient().auth.signInWithOAuth({
@@ -123,6 +133,7 @@ export default function AuthForm({
 
       if (error || !data.url) {
         setMessage("Google sign-in could not start. Please try again.");
+        setMessageIsError(true);
         return;
       }
 
@@ -135,6 +146,7 @@ export default function AuthForm({
       setMessage(
         "We could not reach the account service. Check your connection and try again."
       );
+      setMessageIsError(true);
     } finally {
       setLoading(false);
       submissionInFlight.current = false;
@@ -161,7 +173,7 @@ export default function AuthForm({
 
       {message && (
         <div
-          className="auth-notice is-error"
+          className={`auth-notice${messageIsError ? " is-error" : ""}`}
           role="alert"
           aria-live="polite"
         >
