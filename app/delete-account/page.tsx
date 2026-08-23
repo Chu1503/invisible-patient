@@ -68,7 +68,7 @@ export default function DeleteAccountPage() {
           </span>
           <h1>Delete your account</h1>
           <p>
-            This permanently deletes your Invisible Patient account and cannot
+            This permanently deletes your Invizy account and cannot
             be undone.
           </p>
 

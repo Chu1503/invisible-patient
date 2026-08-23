@@ -44,6 +44,7 @@ export default function PwaInstallPrompt() {
   useEffect(() => {
     if (
       window.Capacitor?.isNativePlatform?.() ||
+      navigator.userAgent.includes("Invizy/") ||
       navigator.userAgent.includes("InvisiblePatient/")
     ) {
       return;
@@ -112,7 +113,7 @@ export default function PwaInstallPrompt() {
   if (!visible) return null;
 
   return (
-    <aside className="pwa-install-card" aria-label="Install The Invisible Patient">
+    <aside className="pwa-install-card" aria-label="Install Invizy">
       <button
         type="button"
         className="pwa-install-close"
@@ -125,7 +126,7 @@ export default function PwaInstallPrompt() {
         {showIosHelp ? <Share size={20} /> : <Download size={20} />}
       </div>
       <div className="pwa-install-copy">
-        <strong>Keep Invisible Patient on your phone</strong>
+        <strong>Keep Invizy on your phone</strong>
         <span>
           {showIosHelp
             ? "Tap Share in Safari, then Add to Home Screen."

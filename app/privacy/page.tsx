@@ -2,15 +2,15 @@ import type { Metadata } from "next";
 import LegalPage from "@/components/LegalPage";
 
 export const metadata: Metadata = {
-  title: "Privacy Policy | The Invisible Patient",
-  description: "Privacy Policy for The Invisible Patient.",
+  title: "Privacy Policy | Invizy",
+  description: "Privacy Policy for Invizy.",
 };
 
 const sections = [
   {
     title: "Information We Collect",
     paragraphs: [
-      "When you use Invisible Patient, we may collect the following information.",
+      "When you use Invizy, we may collect the following information.",
     ],
     blocks: [
       {
@@ -48,7 +48,7 @@ const sections = [
       {
         title: "Care and Conversation Data",
         paragraphs: [
-          "Invisible Patient allows you to record information related to caregiving.",
+          "Invizy allows you to record information related to caregiving.",
           "Depending on how you use the application, this may include:",
         ],
         items: [
@@ -101,7 +101,7 @@ const sections = [
   {
     title: "AI Processing",
     paragraphs: [
-      "Invisible Patient uses artificial intelligence to generate responses and insights.",
+      "Invizy uses artificial intelligence to generate responses and insights.",
       "When you interact with AI powered features, portions of your conversations may be securely transmitted to our AI service provider, Anthropic.",
       "This provider processes the information to generate responses requested by you.",
       "We encourage users not to submit highly sensitive personal or medical information unless they understand the risks associated with cloud based AI services.",
@@ -110,7 +110,7 @@ const sections = [
   {
     title: "Third Party Services",
     paragraphs: [
-      "Invisible Patient relies on trusted third party providers to operate.",
+      "Invizy relies on trusted third party providers to operate.",
       "These currently include:",
     ],
     items: [
@@ -167,7 +167,7 @@ const sections = [
   {
     title: "Children's Privacy",
     paragraphs: [
-      "Invisible Patient is not intended for children under the age of 13.",
+      "Invizy is not intended for children under the age of 13.",
       "We do not knowingly collect information from children under 13.",
     ],
   },
@@ -192,7 +192,7 @@ const sections = [
   {
     title: "Medical Disclaimer",
     paragraphs: [
-      "Invisible Patient provides organizational tools and AI assisted informational support.",
+      "Invizy provides organizational tools and AI assisted informational support.",
       "It is not a medical device and does not provide medical advice, diagnosis, or treatment.",
       "Always consult qualified healthcare professionals regarding medical decisions.",
       "Do not rely on AI generated responses during emergencies.",
@@ -220,8 +220,8 @@ export default function PrivacyPage() {
     <LegalPage
       title="Privacy Policy"
       introduction={[
-        'Welcome to Invisible Patient, referred to as "Invisible Patient," "we," "our," or "us." This Privacy Policy explains what information we collect, how we use it, who we share it with, and the choices available to you.',
-        "By using Invisible Patient, you agree to the practices described in this Privacy Policy.",
+        'Welcome to Invizy, referred to as "Invizy," "we," "our," or "us." This Privacy Policy explains what information we collect, how we use it, who we share it with, and the choices available to you.',
+        "By using Invizy, you agree to the practices described in this Privacy Policy.",
       ]}
       sections={sections}
     />

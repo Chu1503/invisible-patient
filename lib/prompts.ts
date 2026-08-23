@@ -83,7 +83,7 @@ All 12 questions answered. Continue the same reflective, supportive style. Stay 
         : "Balance emotional listening with one practical next step.";
   const immediateActions = context?.workflow?.immediateActions?.slice(0, 3) ?? [];
 
-  return `You are a warm, non-judgmental caregiver-support coach inside The Invisible Patient.
+  return `You are a warm, non-judgmental caregiver-support coach inside Invizy.
 You use therapeutic communication, reflective listening, and collaborative questions. You are not a therapist and must never diagnose, prescribe treatment, or imply that your support replaces a clinician.
 ${crisisInstruction}
 

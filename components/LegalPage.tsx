@@ -24,9 +24,9 @@ export default function LegalPage({
   return (
     <main className="legal-page">
       <div className="legal-shell">
-        <Link href="/" className="legal-brand" aria-label="The Invisible Patient">
+        <Link href="/" className="legal-brand" aria-label="Invizy">
           <span className="ip-brand-mark" aria-hidden="true" />
-          <span>The Invisible Patient</span>
+          <span>Invizy</span>
         </Link>
 
         <article className="legal-card">
@@ -78,7 +78,7 @@ export default function LegalPage({
                 {section.contact && (
                   <a
                     className="legal-contact"
-                    href="mailto:support@invisible-patient.com"
+                    href="mailto:support@invizy.app"
                   >
                     Contact support
                   </a>

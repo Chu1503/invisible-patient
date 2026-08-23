@@ -12,6 +12,10 @@ const AUTH_ATTEMPTS_KEY = "ip_auth_attempts";
 const AUTH_ATTEMPT_LIMIT = 5;
 const AUTH_ATTEMPT_WINDOW_MS = 15 * 60 * 1000;
 
+function safeNextPath(value: string | null): string {
+  return value?.startsWith("/") && !value.startsWith("//") ? value : "/";
+}
+
 function recordAuthAttempt(): boolean {
   const now = Date.now();
   let attempts: number[] = [];
@@ -121,12 +125,18 @@ export default function AuthForm({
     setMessageIsError(false);
 
     try {
+      const next = safeNextPath(
+        new URLSearchParams(window.location.search).get("next")
+      );
+      const webCallback = new URL("/auth/callback", window.location.origin);
+      if (next !== "/") webCallback.searchParams.set("next", next);
+
       const { data, error } = await createClient().auth.signInWithOAuth({
         provider: "google",
         options: {
           redirectTo: Capacitor.isNativePlatform()
             ? NATIVE_AUTH_CALLBACK_URL
-            : `${window.location.origin}/auth/callback`,
+            : webCallback.toString(),
           skipBrowserRedirect: true,
         },
       });
@@ -157,7 +167,7 @@ export default function AuthForm({
     <div className="auth-card">
       <div className="auth-brand">
         <span className="ip-brand-mark" aria-hidden="true" />
-        <span>The Invisible Patient</span>
+        <span>Invizy</span>
       </div>
 
       <div className="auth-heading">

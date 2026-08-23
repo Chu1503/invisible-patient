@@ -22,6 +22,10 @@ function isApiPath(pathname: string): boolean {
   return pathname.startsWith("/api/");
 }
 
+function safeNextPath(value: string | null): string {
+  return value?.startsWith("/") && !value.startsWith("//") ? value : "/";
+}
+
 export async function updateSession(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
@@ -64,12 +68,16 @@ export async function updateSession(request: NextRequest) {
     const url = request.nextUrl.clone();
     url.pathname = "/auth";
     url.search = "";
+    url.searchParams.set(
+      "next",
+      request.nextUrl.pathname
+    );
     return NextResponse.redirect(url);
   }
 
   if (claims && pathname === "/auth") {
     const url = request.nextUrl.clone();
-    url.pathname = "/";
+    url.pathname = safeNextPath(request.nextUrl.searchParams.get("next"));
     url.search = "";
     return NextResponse.redirect(url);
   }

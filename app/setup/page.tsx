@@ -98,7 +98,7 @@ export default function SetupPage() {
         <header className="setup-header">
           <div className="auth-brand">
             <span className="ip-brand-mark" aria-hidden="true" />
-            <span>The Invisible Patient</span>
+            <span>Invizy</span>
           </div>
           <p>
             Step {step + 1} of {TOTAL_STEPS}

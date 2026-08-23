@@ -72,7 +72,7 @@ export async function showTaskSystemReminder(task: CareTask): Promise<void> {
   try {
     const registration = await registerReminderWorker();
     await registration.showNotification("Care task reminder", {
-      body: "A care task is due. Open The Invisible Patient to review it.",
+      body: "A care task is due. Open Invizy to review it.",
       tag: `care-task-${task.id}-${task.dueAt ?? "unscheduled"}`,
       data: { url: "/tasks" },
     });

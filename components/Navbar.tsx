@@ -46,7 +46,7 @@ export default function Navbar() {
       <Link href="/" className="ip-brand">
         <span className="ip-brand-mark" aria-hidden="true" />
         <span>
-          The Invisible Patient
+          Invizy
         </span>
       </Link>
       <div className="ip-nav-links">

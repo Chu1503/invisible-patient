@@ -5,8 +5,8 @@ export const dynamic = "force-static";
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "The Invisible Patient",
-    short_name: "Invisible Patient",
+    name: "Invizy",
+    short_name: "Invizy",
     description:
       "Private caregiver support, care context, follow ups, and strain insights.",
     start_url: "/",

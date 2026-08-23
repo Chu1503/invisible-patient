@@ -7,14 +7,15 @@ import TaskReminderManager from "@/components/TaskReminderManager";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "The Invisible Patient",
+  metadataBase: new URL("https://invizy.app"),
+  title: "Invizy",
   description: "A mental health support system for dementia and brain injury caregivers.",
-  applicationName: "The Invisible Patient",
+  applicationName: "Invizy",
   manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "Invisible Patient",
+    title: "Invizy",
   },
   formatDetection: {
     telephone: false,

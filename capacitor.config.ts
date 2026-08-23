@@ -2,11 +2,11 @@ import type { CapacitorConfig } from "@capacitor/cli";
 
 const config: CapacitorConfig = {
   appId: "com.chu1503.invisiblepatient",
-  appName: "The Invisible Patient",
+  appName: "Invizy",
   webDir: ".capacitor-build/out",
   backgroundColor: "#F9FAF7",
   loggingBehavior: "debug",
-  appendUserAgent: " InvisiblePatient/1.0",
+  appendUserAgent: " Invizy/1.0",
   android: {
     allowMixedContent: false,
     backgroundColor: "#F9FAF7",
